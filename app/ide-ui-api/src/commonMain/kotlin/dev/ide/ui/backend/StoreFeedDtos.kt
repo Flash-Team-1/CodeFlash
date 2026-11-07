@@ -749,3 +749,25 @@ data class UiPaymentRequest(
     val adminNote: String?,
     val createdAt: String,
 )
+
+/** One plan as an admin sees it, including whether buyers can see it. */
+data class UiAdminPlan(
+    val code: String,
+    val days: Int?,
+    val priceEgp: Int,
+    val listPriceEgp: Int?,
+    val active: Boolean,
+)
+
+/** A payment waiting for an admin, with who sent it and the transfer reference. */
+data class UiAdminPaymentRequest(
+    val id: String,
+    val userId: String,
+    val handle: String,
+    val displayName: String,
+    val planCode: String,
+    val amountEgp: Int,
+    val reference: String,
+    val status: String,
+    val createdAt: String,
+)
