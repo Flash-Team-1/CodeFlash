@@ -1173,7 +1173,7 @@ class CodeAssistAppState(
     private fun navigatesAsStack(s: Screen): Boolean = when (s) {
         Screen.StoreItem, Screen.PublisherProfile, Screen.You,
         Screen.SubmitProject, Screen.PublishingGuide, Screen.Moderation,
-        Screen.PluginScreen,
+        Screen.PluginScreen, Screen.VerificationPayment,
         Screen.LearnDiscussion, Screen.LearnThread, Screen.LearnAsk, Screen.LearnSolutions -> true
 
         else -> false
@@ -1327,6 +1327,12 @@ class CodeAssistAppState(
     fun openModeration() {
         pushEntry()
         screen = Screen.Moderation
+    }
+
+    /** The Vodafone Cash payment screen for buying verification. */
+    fun openVerificationPayment() {
+        pushEntry()
+        screen = Screen.VerificationPayment
     }
 
 
