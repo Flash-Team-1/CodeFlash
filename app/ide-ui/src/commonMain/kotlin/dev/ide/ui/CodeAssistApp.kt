@@ -23,12 +23,18 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import dev.ide.ui.ads.BuildAdInterstitial
 import dev.ide.ui.ads.LocalAds
 import dev.ide.ui.backend.AdHost
+import dev.ide.ui.backend.RemoteFeatures
+import dev.ide.ui.backend.UiAppUpdate
+import dev.ide.ui.screens.AppUpdateDialog
 import dev.ide.ui.backend.FileActions
 import dev.ide.ui.backend.IdeBackend
 import dev.ide.ui.backend.UiAccent
@@ -119,6 +125,19 @@ fun CodeAssistApp(
     // A `.caproj` handed in from outside the app ("Open with"): read its preview and open the import screen.
     // Keyed on the path (the host makes each hand-off a distinct path) so it fires once per inbound package.
     LaunchedEffect(importPackagePath) { importPackagePath?.let { app.openImportPackage(it) } }
+    // Feature switches from the server, then an update prompt only where the app can install one and only when it is newer.
+    var availableUpdate by remember { mutableStateOf<UiAppUpdate?>(null) }
+    var updateDismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        RemoteFeatures.replace(backend.myFeatures())
+        val latest = backend.latestUpdate()
+        if (fileActions.canInstallApk && latest != null && latest.versionCode > fileActions.appVersionCode) {
+            availableUpdate = latest
+        }
+    }
+    availableUpdate?.takeIf { !updateDismissed }?.let { update ->
+        AppUpdateDialog(update, fileActions) { updateDismissed = true }
+    }
     // A store link handed in from outside the app. Cleared through the host once acted on, so tapping the
     // same link again is a fresh null -> id change and opens it again.
     LaunchedEffect(openStoreItemId) {
