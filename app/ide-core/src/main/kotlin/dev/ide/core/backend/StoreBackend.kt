@@ -710,6 +710,15 @@ internal class StoreBackend(
     override suspend fun requestVerificationRenewal(note: String?): String? =
         withContext(storeIo) { moderationState.requestRenewal(note) }
 
+    override suspend fun verificationPlans(): List<dev.ide.ui.backend.UiVerificationPlan> =
+        withContext(storeIo) { moderationState.verificationPlans() }
+
+    override suspend fun myPaymentRequests(): List<dev.ide.ui.backend.UiPaymentRequest> =
+        withContext(storeIo) { moderationState.myPaymentRequests() }
+
+    override suspend fun requestVerificationPayment(plan: String, reference: String): String? =
+        withContext(storeIo) { moderationState.requestVerificationPayment(plan, reference) }
+
     override suspend fun renewalRequests(): List<dev.ide.ui.backend.UiRenewalRequest> =
         withContext(storeIo) { moderationState.renewalRequests() }
 
