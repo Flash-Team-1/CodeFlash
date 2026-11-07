@@ -1541,11 +1541,37 @@ interface StoreService {
     suspend fun requestVerificationRenewal(note: String? = null): String? =
         "Renewal is not available in this build"
 
+    /** The plans a publisher can buy. */
+    suspend fun verificationPlans(): List<UiVerificationPlan> = emptyList()
+
+    /** The signed-in publisher's payments, newest first. */
+    suspend fun myPaymentRequests(): List<UiPaymentRequest> = emptyList()
+
+    /** Null when it went; otherwise the sentence to show. */
+    suspend fun requestVerificationPayment(plan: String, reference: String): String? =
+        "Payments are not available in this build"
+
     /** Verification requests waiting for an admin. Moderators only. */
     suspend fun renewalRequests(): List<UiRenewalRequest> = emptyList()
 
     /** Null when it went; otherwise the sentence to show. */
     suspend fun markRenewalHandled(id: String): String? = "Not available in this build"
+
+    /** Every payment plan, including ones switched off. Moderators only. */
+    suspend fun adminPlans(): List<UiAdminPlan> = emptyList()
+
+    /** Change a plan's price, or set an offer (null = no offer). Null on success, or the sentence to show. */
+    suspend fun setPlan(code: String, priceEgp: Int, listPriceEgp: Int?, active: Boolean): String? =
+        "Not available in this build"
+
+    /** Payments waiting for an admin. Moderators only. */
+    suspend fun paymentRequestsForReview(): List<UiAdminPaymentRequest> = emptyList()
+
+    /** Confirm a payment. Null on success, or the sentence to show. */
+    suspend fun confirmPayment(id: String): String? = "Not available in this build"
+
+    /** Reject a payment with a note the buyer sees. Null on success, or the sentence to show. */
+    suspend fun rejectPayment(id: String, note: String?): String? = "Not available in this build"
 
     /** Publishers for the Verify tab, optionally filtered by name or handle. Moderators only. */
     suspend fun managedPublishers(query: String? = null): UiPublisherPage =

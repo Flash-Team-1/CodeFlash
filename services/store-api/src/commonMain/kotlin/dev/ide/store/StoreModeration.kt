@@ -252,6 +252,18 @@ interface StoreModerationService {
     fun markVerificationNoticesRead(ids: List<String>): StoreResult<Unit> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
+    /** The plans a publisher can buy, with their prices. */
+    fun verificationPlans(): StoreResult<List<VerificationPlan>> =
+        StoreResult.Unavailable("Payments are not available in this build")
+
+    /** The signed-in publisher's own payment requests, newest first. */
+    fun myPaymentRequests(limit: Int = 10): StoreResult<List<PaymentRequest>> =
+        StoreResult.Unavailable("Payments are not available in this build")
+
+    /** Send a Vodafone Cash payment for a plan, with the transfer reference. One open request at a time. */
+    fun requestVerificationPayment(plan: String, reference: String): StoreResult<Unit> =
+        StoreResult.Unavailable("Payments are not available in this build")
+
     /** Verification requests waiting for an admin, newest first. Moderators only. */
     fun renewalRequests(limit: Int = 50): StoreResult<List<RenewalRequest>> =
         StoreResult.Unavailable("Moderation is not available in this build")
@@ -264,10 +276,52 @@ interface StoreModerationService {
     fun requestRenewal(note: String?): StoreResult<Unit> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
+    /** Every payment plan, including ones switched off. Moderators only. */
+    fun adminPlans(): StoreResult<List<AdminPlan>> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Change a plan's price, or set an offer ([listPriceEgp] is the normal price; null means no offer). Moderators only. */
+    fun setPlan(code: String, priceEgp: Int, listPriceEgp: Int?, active: Boolean): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Payments waiting for an admin, newest first. Moderators only. */
+    fun paymentRequestsForReview(limit: Int = 50): StoreResult<List<AdminPaymentRequest>> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Confirm a payment, which extends the buyer's verification. Moderators only. */
+    fun confirmPayment(id: String): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Reject a payment with a short note the buyer sees. Moderators only. */
+    fun rejectPayment(id: String, note: String?): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
     companion object {
         val Unsupported: StoreModerationService = object : StoreModerationService {}
     }
 }
+
+/** One plan as an admin sees it: its price, its offer price, and whether buyers can see it. */
+data class AdminPlan(
+    val code: String,
+    val days: Int?,
+    val priceEgp: Int,
+    val listPriceEgp: Int?,
+    val active: Boolean,
+)
+
+/** A payment waiting for an admin, with who sent it and the transfer reference. */
+data class AdminPaymentRequest(
+    val id: String,
+    val userId: String,
+    val handle: String,
+    val displayName: String,
+    val planCode: String,
+    val amountEgp: Int,
+    val reference: String,
+    val status: String,
+    val createdAt: String,
+)
 
 /** A publisher's request for verification, waiting for an admin. */
 data class RenewalRequest(
@@ -279,4 +333,22 @@ data class RenewalRequest(
     val createdAt: String,
     val verified: Boolean,
     val verifiedUntil: String?,
+)
+
+/** One plan a publisher can buy. [days] is null for a permanent plan; [listPriceEgp] is set while an offer runs. */
+data class VerificationPlan(
+    val code: String,
+    val days: Int?,
+    val priceEgp: Int,
+    val listPriceEgp: Int?,
+)
+
+/** A payment the signed-in publisher sent, and where it stands. */
+data class PaymentRequest(
+    val id: String,
+    val planCode: String,
+    val amountEgp: Int,
+    val status: String,
+    val adminNote: String?,
+    val createdAt: String,
 )

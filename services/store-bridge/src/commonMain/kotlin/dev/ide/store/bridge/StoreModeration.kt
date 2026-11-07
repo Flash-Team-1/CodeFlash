@@ -109,6 +109,32 @@ class StoreModeration(private val moderation: StoreModerationService) {
         moderation.markVerificationNoticesRead(ids)
     }
 
+    /** The plans a publisher can buy. Empty when they could not be read. */
+    fun verificationPlans(): List<dev.ide.ui.backend.UiVerificationPlan> =
+        when (val r = moderation.verificationPlans()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiVerificationPlan(it.code, it.days, it.priceEgp, it.listPriceEgp)
+            }
+            else -> emptyList()
+        }
+
+    /** The signed-in publisher's payments, newest first. Empty when they could not be read. */
+    fun myPaymentRequests(): List<dev.ide.ui.backend.UiPaymentRequest> =
+        when (val r = moderation.myPaymentRequests()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiPaymentRequest(it.id, it.planCode, it.amountEgp, it.status, it.adminNote, it.createdAt)
+            }
+            else -> emptyList()
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun requestVerificationPayment(plan: String, reference: String): String? =
+        when (val r = moderation.requestVerificationPayment(plan, reference)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
     /** Verification requests waiting for an admin. Empty when they could not be read. */
     fun renewalRequests(): List<dev.ide.ui.backend.UiRenewalRequest> =
         when (val r = moderation.renewalRequests()) {
@@ -129,6 +155,48 @@ class StoreModeration(private val moderation: StoreModerationService) {
 
     /** Null when it went; otherwise the sentence to show. */
     fun requestRenewal(note: String?): String? = when (val r = moderation.requestRenewal(note)) {
+        is StoreResult.Ok -> null
+        is StoreResult.Unavailable -> r.reason
+        is StoreResult.Failed -> r.message
+    }
+
+    /** Every payment plan, including ones switched off. Empty when they could not be read. */
+    fun adminPlans(): List<dev.ide.ui.backend.UiAdminPlan> =
+        when (val r = moderation.adminPlans()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiAdminPlan(it.code, it.days, it.priceEgp, it.listPriceEgp, it.active)
+            }
+            else -> emptyList()
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun setPlan(code: String, priceEgp: Int, listPriceEgp: Int?, active: Boolean): String? =
+        when (val r = moderation.setPlan(code, priceEgp, listPriceEgp, active)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
+    /** Payments waiting for an admin. Empty when they could not be read. */
+    fun paymentRequestsForReview(): List<dev.ide.ui.backend.UiAdminPaymentRequest> =
+        when (val r = moderation.paymentRequestsForReview()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiAdminPaymentRequest(
+                    it.id, it.userId, it.handle, it.displayName, it.planCode, it.amountEgp, it.reference, it.status, it.createdAt,
+                )
+            }
+            else -> emptyList()
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun confirmPayment(id: String): String? = when (val r = moderation.confirmPayment(id)) {
+        is StoreResult.Ok -> null
+        is StoreResult.Unavailable -> r.reason
+        is StoreResult.Failed -> r.message
+    }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun rejectPayment(id: String, note: String?): String? = when (val r = moderation.rejectPayment(id, note)) {
         is StoreResult.Ok -> null
         is StoreResult.Unavailable -> r.reason
         is StoreResult.Failed -> r.message

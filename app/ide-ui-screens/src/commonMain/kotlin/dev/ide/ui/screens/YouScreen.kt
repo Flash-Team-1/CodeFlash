@@ -124,6 +124,8 @@ fun YouScreen(
      * backend, so a build that passed this unconditionally would gain a screen full of refusals.
      */
     onModerate: (() -> Unit)? = null,
+    /** Opens the Vodafone Cash payment screen for verification. Null hides the pay button. */
+    onOpenPayment: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val signedIn = backend.store.authState().collectAsState().value.signedIn
@@ -197,6 +199,7 @@ fun YouScreen(
                     accountDeleteError = accountDeleteError,
                     onEdit = { editing = true },
                     onModerate = onModerate?.takeIf { current.isModerator },
+                    onOpenPayment = onOpenPayment,
                     onWithdraw = { submission ->
                         scope.launch {
                             backend.store.withdrawSubmission(submission.itemId, submission.version)
@@ -313,6 +316,7 @@ private fun YouPage(
     accountDeleteError: String?,
     onEdit: () -> Unit,
     onModerate: (() -> Unit)?,
+    onOpenPayment: (() -> Unit)?,
     onWithdraw: (UiStoreSubmission) -> Unit,
     onUpdate: ((String) -> Unit)?,
     onDelete: (UiStoreSubmission) -> Unit,
@@ -453,7 +457,7 @@ private fun YouPage(
         }
         if (!profile.verified) {
             item("verification-request") {
-                VerificationRequestCard(backend)
+                VerificationRequestCard(backend, onOpenPayment)
             }
         }
         item("account") {
@@ -480,7 +484,7 @@ private fun YouPage(
  * in the Verify tab. It can be dismissed for this visit; it comes back next time you open the page.
  */
 @Composable
-private fun VerificationRequestCard(backend: IdeBackend) {
+private fun VerificationRequestCard(backend: IdeBackend, onPay: (() -> Unit)?) {
     val c = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
     var dismissed by rememberSaveable { mutableStateOf(false) }
@@ -543,8 +547,15 @@ private fun VerificationRequestCard(backend: IdeBackend) {
                     )
                 }
             } else {
-                Button(onClick = { request() }, enabled = !sending) {
-                    Text(stringResource(Res.string.verify_request_button))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { request() }, enabled = !sending) {
+                        Text(stringResource(Res.string.verify_request_button))
+                    }
+                    if (onPay != null) {
+                        OutlinedButton(onClick = onPay) {
+                            Text(stringResource(Res.string.verify_request_pay))
+                        }
+                    }
                 }
             }
         }

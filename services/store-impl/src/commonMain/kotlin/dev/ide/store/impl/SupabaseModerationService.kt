@@ -2,7 +2,11 @@ package dev.ide.store.impl
 
 import dev.ide.platform.JsonReader
 import dev.ide.store.ManagedPublisher
+import dev.ide.store.AdminPaymentRequest
+import dev.ide.store.AdminPlan
+import dev.ide.store.PaymentRequest
 import dev.ide.store.RenewalRequest
+import dev.ide.store.VerificationPlan
 import dev.ide.store.PendingSubmission
 import dev.ide.store.ReportedContent
 import dev.ide.store.ReviewQueue
@@ -387,9 +391,77 @@ class SupabaseModerationService(
         }
     }
 
+    override fun verificationPlans(): StoreResult<List<VerificationPlan>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_payment_plans_list", "{}", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parsePlan),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun myPaymentRequests(limit: Int): StoreResult<List<PaymentRequest>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_my_payment_requests", """{"p_limit":$limit}""", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parsePayment),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun requestVerificationPayment(plan: String, reference: String): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val body = """{"p_plan":${q(plan)},"p_reference":${q(reference)}}"""
+        return unit(rpc("store_request_verification_payment", body, token))
+    }
+
     override fun markRenewalHandled(id: String): StoreResult<Unit> {
         val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
         return unit(rpc("store_admin_handle_renewal", """{"p_id":${q(id)}}""", token))
+    }
+
+    override fun adminPlans(): StoreResult<List<AdminPlan>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_admin_payment_plans", "{}", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parseAdminPlan),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun setPlan(code: String, priceEgp: Int, listPriceEgp: Int?, active: Boolean): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val list = listPriceEgp?.toString() ?: "null"
+        val body = """{"p_code":${q(code)},"p_price":$priceEgp,"p_list_price":$list,"p_active":$active}"""
+        return unit(rpc("store_admin_set_plan", body, token))
+    }
+
+    override fun paymentRequestsForReview(limit: Int): StoreResult<List<AdminPaymentRequest>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_admin_payment_requests", """{"p_limit":$limit}""", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parseAdminPayment),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun confirmPayment(id: String): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return unit(rpc("store_admin_confirm_payment", """{"p_id":${q(id)}}""", token))
+    }
+
+    override fun rejectPayment(id: String, note: String?): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val text = if (note.isNullOrBlank()) "null" else q(note.trim())
+        return unit(rpc("store_admin_reject_payment", """{"p_id":${q(id)},"p_note":$text}""", token))
     }
 
     private fun unit(result: StoreResult<String>): StoreResult<Unit> = when (result) {
@@ -494,6 +566,28 @@ class SupabaseModerationService(
             )
         }
 
+        internal fun parsePlan(value: Any?): VerificationPlan? {
+            val code = JsonReader.str(value, "code") ?: return null
+            return VerificationPlan(
+                code = code,
+                days = JsonReader.int(value, "days").takeIf { it > 0 },
+                priceEgp = JsonReader.int(value, "priceEgp"),
+                listPriceEgp = JsonReader.int(value, "listPriceEgp").takeIf { it > 0 },
+            )
+        }
+
+        internal fun parsePayment(value: Any?): PaymentRequest? {
+            val id = JsonReader.str(value, "id") ?: return null
+            return PaymentRequest(
+                id = id,
+                planCode = JsonReader.str(value, "planCode").orEmpty(),
+                amountEgp = JsonReader.int(value, "amountEgp"),
+                status = JsonReader.str(value, "status").orEmpty(),
+                adminNote = JsonReader.str(value, "adminNote"),
+                createdAt = JsonReader.str(value, "createdAt").orEmpty(),
+            )
+        }
+
         internal fun parseRenewal(value: Any?): RenewalRequest? {
             val id = JsonReader.str(value, "id") ?: return null
             val userId = JsonReader.str(value, "userId") ?: return null
@@ -506,6 +600,33 @@ class SupabaseModerationService(
                 createdAt = JsonReader.str(value, "createdAt").orEmpty(),
                 verified = JsonReader.bool(value, "verified"),
                 verifiedUntil = JsonReader.str(value, "verifiedUntil"),
+            )
+        }
+
+        internal fun parseAdminPlan(value: Any?): AdminPlan? {
+            val code = JsonReader.str(value, "code") ?: return null
+            return AdminPlan(
+                code = code,
+                days = JsonReader.int(value, "days").takeIf { it > 0 },
+                priceEgp = JsonReader.int(value, "priceEgp"),
+                listPriceEgp = JsonReader.int(value, "listPriceEgp").takeIf { it > 0 },
+                active = JsonReader.bool(value, "active"),
+            )
+        }
+
+        internal fun parseAdminPayment(value: Any?): AdminPaymentRequest? {
+            val id = JsonReader.str(value, "id") ?: return null
+            val userId = JsonReader.str(value, "userId") ?: return null
+            return AdminPaymentRequest(
+                id = id,
+                userId = userId,
+                handle = JsonReader.str(value, "handle").orEmpty(),
+                displayName = JsonReader.str(value, "displayName").orEmpty(),
+                planCode = JsonReader.str(value, "planCode").orEmpty(),
+                amountEgp = JsonReader.int(value, "amountEgp"),
+                reference = JsonReader.str(value, "reference").orEmpty(),
+                status = JsonReader.str(value, "status").orEmpty(),
+                createdAt = JsonReader.str(value, "createdAt").orEmpty(),
             )
         }
 

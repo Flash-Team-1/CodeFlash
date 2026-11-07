@@ -50,6 +50,7 @@ import dev.ide.ui.screens.NotificationBell
 import dev.ide.ui.screens.NotificationsSheet
 import dev.ide.ui.screens.PublisherProfileScreen
 import dev.ide.ui.screens.YouScreen
+import dev.ide.ui.screens.PaymentScreen
 import dev.ide.ui.screens.PublishingGuideScreen
 import dev.ide.ui.screens.ChallengeBoardScreen
 import dev.ide.ui.screens.ChallengePlayerScreen
@@ -432,12 +433,18 @@ private fun AppRoute(
             } else {
                 null
             },
+            onOpenPayment = { app.openVerificationPayment() },
             // Signing out from here lands back on the store, so the only way this renders signed out is
             // a session that expired while it was open. Offering sign-in is the whole of that case.
             onSignIn = { app.navigateTo(Screen.Projects) },
             // Null in a build with no moderation transport; the screen additionally draws it only for
             // an account the profile says moderates.
             onModerate = if (backend.store.moderationAvailable()) ({ app.openModeration() }) else null,
+        )
+
+        Screen.VerificationPayment -> PaymentScreen(
+            backend = backend,
+            onBack = app::navigateBack,
         )
 
         Screen.Moderation -> ModerationScreen(

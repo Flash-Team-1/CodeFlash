@@ -230,7 +230,7 @@ private const val TOUR_LAYOUT = "app/src/main/res/layout/tour.xml"
 
 private fun caEditor() = LearnTrackDef(
     id = "codeassist-editor",
-    title = "CodeAssist: The editor",
+    title = "CodeFlash: The editor",
     subtitle = "Quick fixes, renaming, formatting and finding your way",
     iconId = "sparkle",
     accentColor = ACCENT_CODEASSIST,
@@ -245,7 +245,7 @@ private fun caEditor() = LearnTrackDef(
                 LearnStepDef.Concept(
                     "ca-ed-lightbulb-c", "The editor works with you",
                     listOf(
-                        text("CodeAssist understands your code as you type. Two things do most of the work:"),
+                        text("CodeFlash understands your code as you type. Two things do most of the work:"),
                         text("• **Completion** pops up suggestions as you type. Pick one to insert it, imports and all.\n• The **lightbulb** appears beside a problem. Tap it to see fixes: add an import, add a library, create a missing function."),
                         tip("Red underlines are errors, yellow are warnings. Long-press one to see what it says."),
                     ),
@@ -384,7 +384,7 @@ private fun caEditor() = LearnTrackDef(
 
 private fun caProjects() = LearnTrackDef(
     id = "codeassist-projects",
-    title = "CodeAssist: Projects & libraries",
+    title = "CodeFlash: Projects & libraries",
     subtitle = "Templates, modules and adding libraries",
     iconId = "module",
     accentColor = ACCENT_CODEASSIST,
@@ -394,7 +394,7 @@ private fun caProjects() = LearnTrackDef(
     prerequisites = listOf("codeassist-editor"),
     lessons = listOf(
         LearnLessonDef(
-            id = "ca-pr-projects", title = "Projects and modules", summary = "How a CodeAssist project is put together.",
+            id = "ca-pr-projects", title = "Projects and modules", summary = "How a CodeFlash project is put together.",
             iconId = "module", estMinutes = 4,
             steps = listOf(
                 LearnStepDef.Concept(
@@ -407,10 +407,10 @@ private fun caProjects() = LearnTrackDef(
                 ),
                 LearnStepDef.Quiz(
                     "ca-pr-projects-q", "Quick check",
-                    prompt = "You have a Gradle project from Android Studio. How do you open it in CodeAssist?",
+                    prompt = "You have a Gradle project from Android Studio. How do you open it in CodeFlash?",
                     options = listOf("Retype it", "Import it", "Only through Git", "You can't"),
                     correctIndex = 1,
-                    explanation = "Import reads the Gradle build and creates the CodeAssist project for you.",
+                    explanation = "Import reads the Gradle build and creates the CodeFlash project for you.",
                 ),
             ),
         ),
@@ -455,7 +455,7 @@ private fun caProjects() = LearnTrackDef(
                     prompt = "Where do libraries come from when you add them?",
                     options = listOf("They're bundled in the app", "Maven repositories, downloaded once and cached", "You copy jar files by hand", "The Store"),
                     correctIndex = 1,
-                    explanation = "CodeAssist resolves them from Maven repositories and caches them, so they work offline afterwards.",
+                    explanation = "CodeFlash resolves them from Maven repositories and caches them, so they work offline afterwards.",
                 ),
             ),
         ),
@@ -464,7 +464,7 @@ private fun caProjects() = LearnTrackDef(
 
 private fun caBuild() = LearnTrackDef(
     id = "codeassist-build",
-    title = "CodeAssist: Build, run & ship",
+    title = "CodeFlash: Build, run & ship",
     subtitle = "Running, signing and building an APK",
     iconId = "hammer",
     accentColor = ACCENT_CODEASSIST,
@@ -554,7 +554,7 @@ private fun caBuild() = LearnTrackDef(
                 LearnStepDef.Concept(
                     "ca-bu-apk-share", "Ship it",
                     listOf(
-                        text("From here you can install the APK, share it, or publish your project to the **Store**, where other CodeAssist users can open it and learn from it."),
+                        text("From here you can install the APK, share it, or publish your project to the **Store**, where other CodeFlash users can open it and learn from it."),
                     ),
                 ),
             ),
@@ -564,7 +564,7 @@ private fun caBuild() = LearnTrackDef(
 
 private fun caTools() = LearnTrackDef(
     id = "codeassist-tools",
-    title = "CodeAssist: Previews, Git & AI",
+    title = "CodeFlash: Previews, Git & AI",
     subtitle = "See layouts live, save history with Git, get help from the AI",
     iconId = "layers",
     accentColor = ACCENT_CODEASSIST,
@@ -672,7 +672,7 @@ private fun caTools() = LearnTrackDef(
 private fun learnPaths() = listOf(
     LearnPathDef(
         id = "path-codeassist",
-        title = "Master CodeAssist",
+        title = "Master CodeFlash",
         subtitle = "The editor, libraries, builds, previews and Git, hands on",
         iconId = "sparkle",
         accentColor = ACCENT_CODEASSIST,
@@ -4107,13 +4107,13 @@ private fun gettingStarted() = LearnTrackDef(
     level = "Beginner",
     lessons = listOf(
         LearnLessonDef(
-            id = "gs-welcome", title = "Welcome to CodeAssist", summary = "What you can build here.",
+            id = "gs-welcome", title = "Welcome to CodeFlash", summary = "What you can build here.",
             iconId = "sparkle", estMinutes = 3,
             steps = listOf(
                 LearnStepDef.Concept(
                     "gs-welcome-c", "A full IDE on your device",
                     listOf(
-                        text("CodeAssist is a complete IDE that **edits, builds, and runs** Java and Kotlin projects right on your device — no desktop required."),
+                        text("CodeFlash is a complete IDE that **edits, builds, and runs** Java and Kotlin projects right on your device — no desktop required."),
                         text("You get smart code completion, live error checking, a real build system, and for Android projects a full **compile → dex → package → sign** pipeline that produces an installable APK."),
                         tip("Head to the **Store** tab to start a new project from a ready-made template."),
                     ),

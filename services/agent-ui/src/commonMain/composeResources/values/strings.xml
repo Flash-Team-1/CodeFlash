@@ -41,7 +41,7 @@
     <string name="chat_usage_cached">cached</string>
     <string name="chat_antigravity_warning">Experimental. Uses a Google account through the Antigravity endpoint, which violates the Google Terms of Service and has led to account bans. Paste an OAuth refresh or access token (optionally as token|projectId).</string>
     <string name="chat_antigravity_signin">Sign in with Google</string>
-    <string name="chat_antigravity_waiting">Waiting for the browser — approve access, then return to CodeAssist</string>
+    <string name="chat_antigravity_waiting">Waiting for the browser — approve access, then return to CodeFlash</string>
     <string name="chat_cancel">Cancel</string>
     <string name="chat_attach">Attach</string>
     <string name="chat_attach_image">Image</string>
@@ -115,7 +115,7 @@
     <string name="chat_models_all">All models</string>
     <string name="chat_models_none">No models match.</string>
     <string name="chat_models_favorite">Favorite</string>
-    <string name="free_ai_pitch">Free Claude for CodeAssist users, no API key needed. Sign in to get bonus points, plus free points every day.</string>
+    <string name="free_ai_pitch">Free Claude for CodeFlash users, no API key needed. Sign in to get bonus points, plus free points every day.</string>
     <string name="free_ai_sign_in_github">Sign in with GitHub</string>
     <string name="free_ai_sign_in_google">Sign in with Google</string>
     <string name="free_ai_signing_in">Finish signing in in your browser, then come back here.</string>
@@ -127,7 +127,7 @@
     <string name="free_ai_ad_loading">Loading ad…</string>
     <string name="free_ai_ad_failed">No ad is available right now. Try again later.</string>
     <string name="free_ai_ad_pending">Thanks! Your points will appear in a moment.</string>
-    <string name="free_ai_paused">CodeAssist Free AI is paused for the rest of the month. You can still use your own API key.</string>
+    <string name="free_ai_paused">CodeFlash Free AI is paused for the rest of the month. You can still use your own API key.</string>
     <string name="free_ai_cost_hint">1 point = $0.001 of AI usage. One agent step on Claude Haiku 5.5 costs about 1 point.</string>
     <string name="free_ai_strip_points">%1$d AI points</string>
     <string name="free_ai_strip_sign_in">Sign in for free AI</string>
@@ -154,11 +154,11 @@
     <string name="free_ai_usage_ago_m">%1$d min ago</string>
     <string name="free_ai_usage_ago_h">%1$d h ago</string>
     <string name="free_ai_usage_ago_d">%1$d d ago</string>
-    <string name="free_ai_card_title">CodeAssist Free AI</string>
+    <string name="free_ai_card_title">CodeFlash Free AI</string>
     <string name="free_ai_card_pitch">Claude without an API key. Pay with points: free ones every day, more for watching an ad.</string>
     <string name="free_ai_in_use">In use</string>
     <string name="free_ai_section_byok">Use your own API key</string>
-    <string name="free_ai_use_this">Use CodeAssist Free AI</string>
+    <string name="free_ai_use_this">Use CodeFlash Free AI</string>
     <string name="chat_status_thinking">Thinking…</string>
     <string name="chat_status_writing">Writing…</string>
     <string name="chat_status_running">Running %1$s</string>
@@ -236,7 +236,7 @@
     <string name="aihome_pick_none">No projects match</string>
     <string name="aihome_kind_android">Android app</string>
     <string name="aihome_kind_project">Project</string>
-    <string name="aihome_title">CodeAssist AI</string>
+    <string name="aihome_title">CodeFlash AI</string>
     <string name="aihome_greeting">Hello</string>
     <string name="aihome_greeting_name">Hello, %1$s</string>
     <string name="aihome_headline_project">What should we do with %1$s?</string>
