@@ -276,10 +276,52 @@ interface StoreModerationService {
     fun requestRenewal(note: String?): StoreResult<Unit> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
+    /** Every payment plan, including ones switched off. Moderators only. */
+    fun adminPlans(): StoreResult<List<AdminPlan>> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Change a plan's price, or set an offer ([listPriceEgp] is the normal price; null means no offer). Moderators only. */
+    fun setPlan(code: String, priceEgp: Int, listPriceEgp: Int?, active: Boolean): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Payments waiting for an admin, newest first. Moderators only. */
+    fun paymentRequestsForReview(limit: Int = 50): StoreResult<List<AdminPaymentRequest>> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Confirm a payment, which extends the buyer's verification. Moderators only. */
+    fun confirmPayment(id: String): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Reject a payment with a short note the buyer sees. Moderators only. */
+    fun rejectPayment(id: String, note: String?): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
     companion object {
         val Unsupported: StoreModerationService = object : StoreModerationService {}
     }
 }
+
+/** One plan as an admin sees it: its price, its offer price, and whether buyers can see it. */
+data class AdminPlan(
+    val code: String,
+    val days: Int?,
+    val priceEgp: Int,
+    val listPriceEgp: Int?,
+    val active: Boolean,
+)
+
+/** A payment waiting for an admin, with who sent it and the transfer reference. */
+data class AdminPaymentRequest(
+    val id: String,
+    val userId: String,
+    val handle: String,
+    val displayName: String,
+    val planCode: String,
+    val amountEgp: Int,
+    val reference: String,
+    val status: String,
+    val createdAt: String,
+)
 
 /** A publisher's request for verification, waiting for an admin. */
 data class RenewalRequest(
