@@ -725,6 +725,21 @@ internal class StoreBackend(
     override suspend fun markRenewalHandled(id: String): String? =
         withContext(storeIo) { moderationState.markRenewalHandled(id) }
 
+    override suspend fun adminPlans(): List<dev.ide.ui.backend.UiAdminPlan> =
+        withContext(storeIo) { moderationState.adminPlans() }
+
+    override suspend fun setPlan(code: String, priceEgp: Int, listPriceEgp: Int?, active: Boolean): String? =
+        withContext(storeIo) { moderationState.setPlan(code, priceEgp, listPriceEgp, active) }
+
+    override suspend fun paymentRequestsForReview(): List<dev.ide.ui.backend.UiAdminPaymentRequest> =
+        withContext(storeIo) { moderationState.paymentRequestsForReview() }
+
+    override suspend fun confirmPayment(id: String): String? =
+        withContext(storeIo) { moderationState.confirmPayment(id) }
+
+    override suspend fun rejectPayment(id: String, note: String?): String? =
+        withContext(storeIo) { moderationState.rejectPayment(id, note) }
+
     override suspend fun managedPublishers(query: String?): dev.ide.ui.backend.UiPublisherPage =
         withContext(storeIo) { moderationState.publishers(query) }
 
