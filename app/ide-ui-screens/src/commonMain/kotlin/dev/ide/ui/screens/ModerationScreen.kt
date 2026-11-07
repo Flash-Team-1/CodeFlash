@@ -42,6 +42,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.ide.ui.backend.IdeBackend
+import dev.ide.ui.backend.UiAdminPaymentRequest
+import dev.ide.ui.backend.UiAdminPlan
 import dev.ide.ui.backend.UiListingEdit
 import dev.ide.ui.backend.UiManagedPublisher
 import dev.ide.ui.backend.UiModerationQueue
@@ -103,6 +105,8 @@ fun ModerationScreen(
     var learnReports by remember { mutableStateOf<List<dev.ide.ui.backend.UiLearnReport>>(emptyList()) }
     var publishers by remember { mutableStateOf(UiPublisherPage()) }
     var renewals by remember { mutableStateOf<List<UiRenewalRequest>>(emptyList()) }
+    var payments by remember { mutableStateOf<List<UiAdminPaymentRequest>>(emptyList()) }
+    var plans by remember { mutableStateOf<List<UiAdminPlan>>(emptyList()) }
     // What the last decision said. Kept as the backend wrote it: "was already approved" is what a second
     // moderator sees, and paraphrasing it would lose the only part that explains anything.
     var notice by remember { mutableStateOf<String?>(null) }
@@ -128,6 +132,8 @@ fun ModerationScreen(
         publishers = runCatching { backend.store.managedPublishers() }
             .getOrElse { UiPublisherPage(error = it.message ?: "The publishers could not be read") }
         renewals = runCatching { backend.store.renewalRequests() }.getOrDefault(emptyList())
+        payments = runCatching { backend.store.paymentRequestsForReview() }.getOrDefault(emptyList())
+        plans = runCatching { backend.store.adminPlans() }.getOrDefault(emptyList())
     }
 
     /** Run a decision, show whatever it said, and reload either way: the queue moved regardless. */
@@ -153,7 +159,7 @@ fun ModerationScreen(
                 return@Column
             }
             Column(Modifier.widthIn(max = 720.dp).fillMaxSize()) {
-                ModerationTabs(tab, queue.pendingCount, reports.size, learnReports.size, renewals.size) { tab = it }
+                ModerationTabs(tab, queue.pendingCount, reports.size, learnReports.size, renewals.size, payments.size) { tab = it }
                 if (queue.loading || working) LinearProgressIndicator(Modifier.fillMaxWidth())
                 notice?.let { Notice(it) { notice = null } }
 
@@ -210,6 +216,17 @@ fun ModerationScreen(
                                 val failure = backend.store.setPublisherVerified(req.userId, "days", 30)
                                 failure ?: backend.store.markRenewalHandled(req.id)
                             }
+                        },
+                    )
+
+                    ModerationTab.Payments -> PaymentsList(
+                        plans = plans,
+                        payments = payments,
+                        enabled = !working,
+                        onConfirm = { id -> decide { backend.store.confirmPayment(id) } },
+                        onReject = { id, note -> decide { backend.store.rejectPayment(id, note) } },
+                        onSavePlan = { code, price, list, active ->
+                            decide { backend.store.setPlan(code, price, list, active) }
                         },
                     )
 
@@ -452,7 +469,7 @@ private fun NotAModerator() {
     }
 }
 
-private enum class ModerationTab { Queue, Reports, Learn, Verify, Requests }
+private enum class ModerationTab { Queue, Reports, Learn, Verify, Requests, Payments }
 
 /**
  * Verification requests from publishers who asked for one. Tap a row for their details, then open their
@@ -559,6 +576,7 @@ private fun ModerationTabs(
     reports: Int,
     learnReports: Int,
     requests: Int,
+    payments: Int,
     onSelect: (ModerationTab) -> Unit,
 ) {
     LazyRow(
@@ -575,6 +593,7 @@ private fun ModerationTabs(
                 ModerationTab.Learn -> learnReports
                 ModerationTab.Verify -> 0
                 ModerationTab.Requests -> requests
+                ModerationTab.Payments -> payments
             }
             val label = when (t) {
                 ModerationTab.Queue -> stringResource(Res.string.moderation_tab_queue)
@@ -582,6 +601,7 @@ private fun ModerationTabs(
                 ModerationTab.Learn -> stringResource(Res.string.learn_reports_title)
                 ModerationTab.Verify -> stringResource(Res.string.moderation_tab_verify)
                 ModerationTab.Requests -> stringResource(Res.string.moderation_tab_requests)
+                ModerationTab.Payments -> stringResource(Res.string.moderation_tab_payments)
             }
             PillChip(
                 label = if (count > 0) "$label ($count)" else label,
@@ -1145,4 +1165,228 @@ private fun LearnReportList(
             }
         }
     }
+}
+
+/** A plan's name as the buyer sees it. */
+@Composable
+private fun planName(code: String): String = when (code) {
+    "1m" -> stringResource(Res.string.payment_plan_month)
+    "2m" -> stringResource(Res.string.payment_plan_two_months)
+    else -> stringResource(Res.string.payment_plan_forever)
+}
+
+/**
+ * The Payments tab: the plans and their offers on top (tap one to change its price or switch it off), then the
+ * payments waiting for a decision. Confirming extends the buyer's verification; rejecting asks for a reason they will see.
+ */
+@Composable
+private fun PaymentsList(
+    plans: List<UiAdminPlan>,
+    payments: List<UiAdminPaymentRequest>,
+    enabled: Boolean,
+    onConfirm: (String) -> Unit,
+    onReject: (String, String?) -> Unit,
+    onSavePlan: (String, Int, Int?, Boolean) -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    var editing by remember { mutableStateOf<UiAdminPlan?>(null) }
+    var rejecting by remember { mutableStateOf<UiAdminPaymentRequest?>(null) }
+    LazyColumn(
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "plans-title") {
+            Text(
+                stringResource(Res.string.payments_plan_prices_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = c.onSurface,
+            )
+        }
+        items(plans, key = { it.code }) { p ->
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = c.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = { editing = p }),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(planName(p.code), style = MaterialTheme.typography.titleSmall, color = c.onSurface)
+                    Spacer(Modifier.height(4.dp))
+                    val offer = p.listPriceEgp?.let { " · ${stringResource(Res.string.payment_offer_tag)} ($it)" }.orEmpty()
+                    val state = if (p.active) stringResource(Res.string.payments_plan_on) else stringResource(Res.string.payments_plan_off)
+                    Text(
+                        "${p.priceEgp} ${stringResource(Res.string.payment_currency)}$offer · $state",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        item(key = "payments-title") {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(Res.string.moderation_tab_payments),
+                style = MaterialTheme.typography.titleMedium,
+                color = c.onSurface,
+            )
+        }
+        if (payments.isEmpty()) {
+            item(key = "payments-empty") {
+                Text(
+                    stringResource(Res.string.payments_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            }
+        }
+        items(payments, key = { it.id }) { r ->
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = c.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "${r.displayName.ifBlank { r.handle }}  @${r.handle}",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = c.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${planName(r.planCode)} · ${r.amountEgp} ${stringResource(Res.string.payment_currency)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.onSurface,
+                    )
+                    Text(
+                        stringResource(Res.string.payments_ref, r.reference),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.onSurfaceVariant,
+                    )
+                    Text(
+                        stringResource(Res.string.requests_sent_at, r.createdAt.take(10)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row {
+                        TextButton(enabled = enabled, onClick = { onConfirm(r.id) }) {
+                            Text(stringResource(Res.string.payments_confirm))
+                        }
+                        TextButton(enabled = enabled, onClick = { rejecting = r }) {
+                            Text(stringResource(Res.string.payments_reject))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    editing?.let { p ->
+        PlanDialog(
+            plan = p,
+            onDismiss = { editing = null },
+            onSave = { price, list, active ->
+                editing = null
+                onSavePlan(p.code, price, list, active)
+            },
+        )
+    }
+    rejecting?.let { r ->
+        RejectPaymentDialog(
+            request = r,
+            onDismiss = { rejecting = null },
+            onReject = { note ->
+                rejecting = null
+                onReject(r.id, note)
+            },
+        )
+    }
+}
+
+/** Change one plan's price, or set an offer (a normal price above the offer; leave it empty for no offer), or switch it off. */
+@Composable
+private fun PlanDialog(
+    plan: UiAdminPlan,
+    onDismiss: () -> Unit,
+    onSave: (Int, Int?, Boolean) -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    var price by remember(plan.code) { mutableStateOf(plan.priceEgp.toString()) }
+    var list by remember(plan.code) { mutableStateOf(plan.listPriceEgp?.toString().orEmpty()) }
+    var active by remember(plan.code) { mutableStateOf(plan.active) }
+    val priceValue = price.toIntOrNull()?.takeIf { it in 1..100_000 }
+    val listValue = list.toIntOrNull()
+    val listOk = list.isBlank() || (listValue != null && priceValue != null && listValue > priceValue)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(planName(plan.code)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { price = it.filter { ch -> ch.isDigit() }.take(6) },
+                    label = { Text(stringResource(Res.string.payments_price_label)) },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = list,
+                    onValueChange = { list = it.filter { ch -> ch.isDigit() }.take(6) },
+                    label = { Text(stringResource(Res.string.payments_list_label)) },
+                    singleLine = true,
+                )
+                TextButton(onClick = { active = !active }) {
+                    Text(
+                        if (active) stringResource(Res.string.payments_turn_off)
+                        else stringResource(Res.string.payments_turn_on),
+                    )
+                }
+                Text(
+                    if (active) stringResource(Res.string.payments_plan_on) else stringResource(Res.string.payments_plan_off),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = priceValue != null && listOk,
+                onClick = { priceValue?.let { onSave(it, listValue, active) } },
+            ) { Text(stringResource(Res.string.payments_save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.payments_cancel)) }
+        },
+    )
+}
+
+/** The note a rejected buyer reads. Optional, but a reason is what tells them what to fix. */
+@Composable
+private fun RejectPaymentDialog(
+    request: UiAdminPaymentRequest,
+    onDismiss: () -> Unit,
+    onReject: (String?) -> Unit,
+) {
+    var note by remember(request.id) { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.payments_reject_title)) },
+        text = {
+            OutlinedTextField(
+                value = note,
+                onValueChange = { note = it.take(300) },
+                label = { Text(stringResource(Res.string.payments_reject_note_label)) },
+                minLines = 2,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onReject(note.trim().takeIf { it.isNotEmpty() }) }) {
+                Text(stringResource(Res.string.payments_reject))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.payments_cancel)) }
+        },
+    )
 }
