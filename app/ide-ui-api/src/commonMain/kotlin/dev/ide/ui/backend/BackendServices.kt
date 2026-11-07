@@ -1557,6 +1557,22 @@ interface StoreService {
     /** Null when it went; otherwise the sentence to show. */
     suspend fun markRenewalHandled(id: String): String? = "Not available in this build"
 
+    /** Every payment plan, including ones switched off. Moderators only. */
+    suspend fun adminPlans(): List<UiAdminPlan> = emptyList()
+
+    /** Change a plan's price, or set an offer (null = no offer). Null on success, or the sentence to show. */
+    suspend fun setPlan(code: String, priceEgp: Int, listPriceEgp: Int?, active: Boolean): String? =
+        "Not available in this build"
+
+    /** Payments waiting for an admin. Moderators only. */
+    suspend fun paymentRequestsForReview(): List<UiAdminPaymentRequest> = emptyList()
+
+    /** Confirm a payment. Null on success, or the sentence to show. */
+    suspend fun confirmPayment(id: String): String? = "Not available in this build"
+
+    /** Reject a payment with a note the buyer sees. Null on success, or the sentence to show. */
+    suspend fun rejectPayment(id: String, note: String?): String? = "Not available in this build"
+
     /** Publishers for the Verify tab, optionally filtered by name or handle. Moderators only. */
     suspend fun managedPublishers(query: String? = null): UiPublisherPage =
         UiPublisherPage(error = "Moderation is not available in this build")
