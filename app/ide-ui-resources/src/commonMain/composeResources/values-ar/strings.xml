@@ -1029,6 +1029,7 @@
     <string name="payment_plan_forever">للأبد</string>
     <string name="payment_offer_tag">عرض</string>
     <string name="payment_currency">جنيه</string>
+    <string name="verify_request_pay">ادفع بفودافون كاش</string>
     <string name="verify_empty">مفيش ناشرين في المتجر لسه.</string>
     <string name="moderation_queue_clear">لا شيء ينتظر المراجعة.</string>
     <string name="moderation_recent">القرارات الأخيرة</string>
