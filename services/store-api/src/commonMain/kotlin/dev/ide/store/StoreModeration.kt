@@ -252,6 +252,18 @@ interface StoreModerationService {
     fun markVerificationNoticesRead(ids: List<String>): StoreResult<Unit> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
+    /** The plans a publisher can buy, with their prices. */
+    fun verificationPlans(): StoreResult<List<VerificationPlan>> =
+        StoreResult.Unavailable("Payments are not available in this build")
+
+    /** The signed-in publisher's own payment requests, newest first. */
+    fun myPaymentRequests(limit: Int = 10): StoreResult<List<PaymentRequest>> =
+        StoreResult.Unavailable("Payments are not available in this build")
+
+    /** Send a Vodafone Cash payment for a plan, with the transfer reference. One open request at a time. */
+    fun requestVerificationPayment(plan: String, reference: String): StoreResult<Unit> =
+        StoreResult.Unavailable("Payments are not available in this build")
+
     /** Verification requests waiting for an admin, newest first. Moderators only. */
     fun renewalRequests(limit: Int = 50): StoreResult<List<RenewalRequest>> =
         StoreResult.Unavailable("Moderation is not available in this build")
@@ -279,4 +291,22 @@ data class RenewalRequest(
     val createdAt: String,
     val verified: Boolean,
     val verifiedUntil: String?,
+)
+
+/** One plan a publisher can buy. [days] is null for a permanent plan; [listPriceEgp] is set while an offer runs. */
+data class VerificationPlan(
+    val code: String,
+    val days: Int?,
+    val priceEgp: Int,
+    val listPriceEgp: Int?,
+)
+
+/** A payment the signed-in publisher sent, and where it stands. */
+data class PaymentRequest(
+    val id: String,
+    val planCode: String,
+    val amountEgp: Int,
+    val status: String,
+    val adminNote: String?,
+    val createdAt: String,
 )
