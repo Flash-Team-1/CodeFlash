@@ -1541,6 +1541,16 @@ interface StoreService {
     suspend fun requestVerificationRenewal(note: String? = null): String? =
         "Renewal is not available in this build"
 
+    /** The plans a publisher can buy. */
+    suspend fun verificationPlans(): List<UiVerificationPlan> = emptyList()
+
+    /** The signed-in publisher's payments, newest first. */
+    suspend fun myPaymentRequests(): List<UiPaymentRequest> = emptyList()
+
+    /** Null when it went; otherwise the sentence to show. */
+    suspend fun requestVerificationPayment(plan: String, reference: String): String? =
+        "Payments are not available in this build"
+
     /** Verification requests waiting for an admin. Moderators only. */
     suspend fun renewalRequests(): List<UiRenewalRequest> = emptyList()
 
