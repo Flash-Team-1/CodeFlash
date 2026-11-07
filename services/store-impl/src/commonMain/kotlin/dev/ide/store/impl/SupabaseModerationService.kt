@@ -2,7 +2,9 @@ package dev.ide.store.impl
 
 import dev.ide.platform.JsonReader
 import dev.ide.store.ManagedPublisher
+import dev.ide.store.PaymentRequest
 import dev.ide.store.RenewalRequest
+import dev.ide.store.VerificationPlan
 import dev.ide.store.PendingSubmission
 import dev.ide.store.ReportedContent
 import dev.ide.store.ReviewQueue
@@ -387,6 +389,34 @@ class SupabaseModerationService(
         }
     }
 
+    override fun verificationPlans(): StoreResult<List<VerificationPlan>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_payment_plans_list", "{}", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parsePlan),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun myPaymentRequests(limit: Int): StoreResult<List<PaymentRequest>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_my_payment_requests", """{"p_limit":$limit}""", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parsePayment),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun requestVerificationPayment(plan: String, reference: String): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val body = """{"p_plan":${q(plan)},"p_reference":${q(reference)}}"""
+        return unit(rpc("store_request_verification_payment", body, token))
+    }
+
     override fun markRenewalHandled(id: String): StoreResult<Unit> {
         val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
         return unit(rpc("store_admin_handle_renewal", """{"p_id":${q(id)}}""", token))
@@ -491,6 +521,28 @@ class SupabaseModerationService(
                 read = JsonReader.bool(value, "read"),
                 verifiedUntil = JsonReader.str(value, "verifiedUntil"),
                 daysLeft = JsonReader.int(value, "daysLeft"),
+            )
+        }
+
+        internal fun parsePlan(value: Any?): VerificationPlan? {
+            val code = JsonReader.str(value, "code") ?: return null
+            return VerificationPlan(
+                code = code,
+                days = JsonReader.int(value, "days").takeIf { it > 0 },
+                priceEgp = JsonReader.int(value, "priceEgp"),
+                listPriceEgp = JsonReader.int(value, "listPriceEgp").takeIf { it > 0 },
+            )
+        }
+
+        internal fun parsePayment(value: Any?): PaymentRequest? {
+            val id = JsonReader.str(value, "id") ?: return null
+            return PaymentRequest(
+                id = id,
+                planCode = JsonReader.str(value, "planCode").orEmpty(),
+                amountEgp = JsonReader.int(value, "amountEgp"),
+                status = JsonReader.str(value, "status").orEmpty(),
+                adminNote = JsonReader.str(value, "adminNote"),
+                createdAt = JsonReader.str(value, "createdAt").orEmpty(),
             )
         }
 
