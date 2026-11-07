@@ -109,6 +109,32 @@ class StoreModeration(private val moderation: StoreModerationService) {
         moderation.markVerificationNoticesRead(ids)
     }
 
+    /** The plans a publisher can buy. Empty when they could not be read. */
+    fun verificationPlans(): List<dev.ide.ui.backend.UiVerificationPlan> =
+        when (val r = moderation.verificationPlans()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiVerificationPlan(it.code, it.days, it.priceEgp, it.listPriceEgp)
+            }
+            else -> emptyList()
+        }
+
+    /** The signed-in publisher's payments, newest first. Empty when they could not be read. */
+    fun myPaymentRequests(): List<dev.ide.ui.backend.UiPaymentRequest> =
+        when (val r = moderation.myPaymentRequests()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiPaymentRequest(it.id, it.planCode, it.amountEgp, it.status, it.adminNote, it.createdAt)
+            }
+            else -> emptyList()
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun requestVerificationPayment(plan: String, reference: String): String? =
+        when (val r = moderation.requestVerificationPayment(plan, reference)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
     /** Verification requests waiting for an admin. Empty when they could not be read. */
     fun renewalRequests(): List<dev.ide.ui.backend.UiRenewalRequest> =
         when (val r = moderation.renewalRequests()) {
