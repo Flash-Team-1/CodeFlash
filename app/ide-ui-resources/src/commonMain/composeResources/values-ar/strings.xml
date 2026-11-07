@@ -1010,6 +1010,22 @@
     <string name="requests_open_profile">افتح البروفايل</string>
     <string name="requests_verify_month">وثّق 30 يوم</string>
     <string name="requests_done">تم</string>
+    <string name="moderation_tab_payments">المدفوعات</string>
+    <string name="payments_plan_prices_title">الأسعار والعروض</string>
+    <string name="payments_empty">مفيش مدفوعات مستنية دلوقتي.</string>
+    <string name="payments_plan_on">شغّال</string>
+    <string name="payments_plan_off">موقوف</string>
+    <string name="payments_price_label">السعر (جنيه)</string>
+    <string name="payments_list_label">السعر الأصلي للعرض (فاضي = مفيش عرض)</string>
+    <string name="payments_turn_off">أوقفه</string>
+    <string name="payments_turn_on">شغّله</string>
+    <string name="payments_save">حفظ</string>
+    <string name="payments_cancel">إلغاء</string>
+    <string name="payments_confirm">تأكيد</string>
+    <string name="payments_reject">رفض</string>
+    <string name="payments_reject_title">رفض الدفع</string>
+    <string name="payments_reject_note_label">السبب اللي هيشوفه المشتري</string>
+    <string name="payments_ref">المرجع: %1$s</string>
     <string name="payment_title">دفع التوثيق</string>
     <string name="payment_pay_with">ابعت الفلوس عن طريق فودافون كاش على الرقم:</string>
     <string name="payment_copy">نسخ</string>
