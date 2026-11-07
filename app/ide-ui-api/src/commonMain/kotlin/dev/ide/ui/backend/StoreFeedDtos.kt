@@ -731,3 +731,21 @@ data class UiRenewalRequest(
     val verified: Boolean,
     val verifiedUntil: String?,
 )
+
+/** A plan a publisher can buy. [days] is null for a permanent plan; [listPriceEgp] is set while an offer runs. */
+data class UiVerificationPlan(
+    val code: String,
+    val days: Int?,
+    val priceEgp: Int,
+    val listPriceEgp: Int?,
+)
+
+/** A payment the signed-in publisher sent, and where it stands ("pending", "confirmed" or "rejected"). */
+data class UiPaymentRequest(
+    val id: String,
+    val planCode: String,
+    val amountEgp: Int,
+    val status: String,
+    val adminNote: String?,
+    val createdAt: String,
+)
