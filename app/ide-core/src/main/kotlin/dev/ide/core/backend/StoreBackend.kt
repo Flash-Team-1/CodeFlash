@@ -740,6 +740,35 @@ internal class StoreBackend(
     override suspend fun rejectPayment(id: String, note: String?): String? =
         withContext(storeIo) { moderationState.rejectPayment(id, note) }
 
+    override suspend fun adminFeatures(): List<dev.ide.ui.backend.UiAdminFeature> =
+        withContext(storeIo) { moderationState.adminFeatures() }
+
+    override suspend fun setFeature(
+        key: String, enabled: Boolean, percent: Int, audience: String, allowUserIds: List<String>,
+    ): String? = withContext(storeIo) { moderationState.setFeature(key, enabled, percent, audience, allowUserIds) }
+
+    override suspend fun adminReleases(): List<dev.ide.ui.backend.UiAdminRelease> =
+        withContext(storeIo) { moderationState.adminReleases() }
+
+    override suspend fun publishRelease(
+        versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
+        percent: Int, audience: String,
+    ): String? = withContext(storeIo) {
+        moderationState.publishRelease(versionCode, versionName, channel, downloadUrl, notes, percent, audience)
+    }
+
+    override suspend fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String): String? =
+        withContext(storeIo) { moderationState.setRelease(id, enabled, percent, audience) }
+
+    /** The per-install id the feature and update checks are keyed by when nobody is signed in. */
+    private fun updateDeviceId(): String? = ctx.manager?.preference(INSTALL_ID_PREF)
+
+    override suspend fun myFeatures(): Map<String, Boolean> =
+        withContext(storeIo) { moderationState.myFeatures(updateDeviceId()) }
+
+    override suspend fun latestUpdate(): dev.ide.ui.backend.UiAppUpdate? =
+        withContext(storeIo) { moderationState.latestUpdate(updateDeviceId()) }
+
     override suspend fun managedPublishers(query: String?): dev.ide.ui.backend.UiPublisherPage =
         withContext(storeIo) { moderationState.publishers(query) }
 
