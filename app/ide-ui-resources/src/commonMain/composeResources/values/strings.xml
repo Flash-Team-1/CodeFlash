@@ -962,6 +962,7 @@ We never collect your code, file or project names, what you type, or anything th
     <string name="payment_plan_forever">Forever</string>
     <string name="payment_offer_tag">Offer</string>
     <string name="payment_currency">EGP</string>
+    <string name="verify_request_pay">Pay with Vodafone Cash</string>
     <string name="verify_empty">No publishers in the store yet.</string>
     <string name="moderation_queue_clear">Nothing is waiting for review.</string>
     <string name="moderation_recent">Recent decisions</string>
