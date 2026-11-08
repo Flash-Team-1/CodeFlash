@@ -15,6 +15,10 @@ import dev.ide.store.bridge.StoreReviews
 import dev.ide.store.bridge.StoreSearchPaging
 import dev.ide.store.bridge.StoreSubmissions
 import dev.ide.store.bridge.storeIo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import dev.ide.store.bridge.StoreUpdates
 import dev.ide.store.bridge.StoreUpdater
@@ -836,14 +840,37 @@ internal class StoreBackend(
         )
     }
 
+    /** Shared folders on this device. The background sync keeps each of them up to date. */
+    private val sharedRoots = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        syncScope.launch {
+            while (true) {
+                delay(SHARED_SYNC_MS)
+                for (root in sharedRoots.toList()) {
+                    // A live file is open in the editor: pulling would rewrite text under it, so wait.
+                    if (liveManager.isLive(root)) continue
+                    runCatching { collabSync.pull(java.io.File(root)) }
+                }
+            }
+        }
+    }
+
     override suspend fun collabSyncStatus(rootPath: String): dev.ide.ui.backend.UiCollabStatus =
-        withContext(storeIo) { collabSync.status(java.io.File(rootPath)) }
+        withContext(storeIo) {
+            collabSync.status(java.io.File(rootPath)).also { if (it.projectId != null) sharedRoots.add(java.io.File(rootPath).canonicalPath) }
+        }
 
     override suspend fun collabShare(rootPath: String, name: String): dev.ide.ui.backend.UiCollabResult =
-        withContext(storeIo) { collabSync.share(java.io.File(rootPath), name) }
+        withContext(storeIo) {
+            collabSync.share(java.io.File(rootPath), name).also { if (it.error == null) sharedRoots.add(java.io.File(rootPath).canonicalPath) }
+        }
 
     override suspend fun collabJoin(rootPath: String, projectId: String): String? =
-        withContext(storeIo) { collabSync.join(java.io.File(rootPath), projectId) }
+        withContext(storeIo) {
+            collabSync.join(java.io.File(rootPath), projectId).also { if (it == null) sharedRoots.add(java.io.File(rootPath).canonicalPath) }
+        }
 
     override suspend fun collabSyncPull(rootPath: String): String? {
         // A pull rewrites files under the editor. Live files would drift from the editor, so pull waits.
@@ -1175,6 +1202,9 @@ internal class StoreBackend(
     )
 
     private companion object {
+        /** How often shared folders are pulled in the background. */
+        const val SHARED_SYNC_MS = 5_000L
+
         /** How long Home's list of updates is reused. Each check is one search per installed project. */
         const val UPDATES_MEMO_MS = 10L * 60 * 1000
 
