@@ -129,8 +129,8 @@ fun CodeAssistApp(
     var availableUpdate by remember { mutableStateOf<UiAppUpdate?>(null) }
     var updateDismissed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        RemoteFeatures.replace(backend.myFeatures())
-        val latest = backend.latestUpdate()
+        RemoteFeatures.replace(backend.store.myFeatures())
+        val latest = backend.store.latestUpdate()
         if (fileActions.canInstallApk && latest != null && latest.versionCode > fileActions.appVersionCode) {
             availableUpdate = latest
         }
