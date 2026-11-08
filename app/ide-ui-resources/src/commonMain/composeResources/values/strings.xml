@@ -2930,4 +2930,10 @@ We never collect your code, file or project names, what you type, or anything th
     <string name="release_empty">No builds published yet.</string>
     <string name="release_card">Version %1$s (%2$d)</string>
     <string name="release_edit">Edit</string>
+    <string name="release_required_badge">Required</string>
+    <string name="release_mandatory_on">Required update: on</string>
+    <string name="release_mandatory_off">Required update: off</string>
+    <string name="release_delete">Delete build</string>
+    <string name="release_delete_confirm">Tap again to delete</string>
+    <string name="update_mandatory_note">This update is required to keep using the app.</string>
 </resources>
