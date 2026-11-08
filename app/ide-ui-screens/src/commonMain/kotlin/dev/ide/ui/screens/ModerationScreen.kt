@@ -247,12 +247,13 @@ fun ModerationScreen(
                     ModerationTab.Updates -> ReleasesList(
                         releases = releases,
                         enabled = !working,
-                        onPublish = { code, name, channel, url, notes, percent, audience ->
-                            decide { backend.store.publishRelease(code, name, channel, url, notes, percent, audience) }
+                        onPublish = { code, name, channel, url, notes, percent, audience, mandatory ->
+                            decide { backend.store.publishRelease(code, name, channel, url, notes, percent, audience, mandatory) }
                         },
-                        onEdit = { id, on, percent, audience ->
-                            decide { backend.store.setRelease(id, on, percent, audience) }
+                        onEdit = { id, on, percent, audience, mandatory ->
+                            decide { backend.store.setRelease(id, on, percent, audience, mandatory) }
                         },
+                        onDelete = { id -> decide { backend.store.deleteRelease(id) } },
                     )
 
                     ModerationTab.Learn -> LearnReportList(
@@ -1575,8 +1576,9 @@ private fun FeatureDialog(
 private fun ReleasesList(
     releases: List<UiAdminRelease>,
     enabled: Boolean,
-    onPublish: (Int, String, String, String, String?, Int, String) -> Unit,
-    onEdit: (String, Boolean, Int, String) -> Unit,
+    onPublish: (Int, String, String, String, String?, Int, String, Boolean) -> Unit,
+    onEdit: (String, Boolean, Int, String, Boolean) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     val c = MaterialTheme.colorScheme
     var publishing by remember { mutableStateOf(false) }
@@ -1609,8 +1611,9 @@ private fun ReleasesList(
                     )
                     Spacer(Modifier.height(4.dp))
                     val state = if (r.enabled) stringResource(Res.string.rollout_on) else stringResource(Res.string.rollout_off)
+                    val required = if (r.mandatory) " · " + stringResource(Res.string.release_required_badge) else ""
                     Text(
-                        "${channelLabel(r.channel)} · $state · ${r.percent}% · ${audienceLabel(r.audience)}",
+                        "${channelLabel(r.channel)} · $state · ${r.percent}% · ${audienceLabel(r.audience)}$required",
                         style = MaterialTheme.typography.bodyMedium,
                         color = c.onSurfaceVariant,
                     )
@@ -1623,21 +1626,26 @@ private fun ReleasesList(
         ReleaseDialog(
             release = null,
             onDismiss = { publishing = false },
-            onPublish = { code, name, channel, url, notes, percent, audience ->
+            onPublish = { code, name, channel, url, notes, percent, audience, mandatory ->
                 publishing = false
-                onPublish(code, name, channel, url, notes, percent, audience)
+                onPublish(code, name, channel, url, notes, percent, audience, mandatory)
             },
-            onEdit = { _, _, _, _ -> },
+            onEdit = { _, _, _, _, _ -> },
+            onDelete = {},
         )
     }
     editing?.let { r ->
         ReleaseDialog(
             release = r,
             onDismiss = { editing = null },
-            onPublish = { _, _, _, _, _, _, _ -> },
-            onEdit = { id, on, percent, audience ->
+            onPublish = { _, _, _, _, _, _, _, _ -> },
+            onEdit = { id, on, percent, audience, mandatory ->
                 editing = null
-                onEdit(id, on, percent, audience)
+                onEdit(id, on, percent, audience, mandatory)
+            },
+            onDelete = { id ->
+                editing = null
+                onDelete(id)
             },
         )
     }
@@ -1652,8 +1660,9 @@ private fun channelLabel(channel: String): String =
 private fun ReleaseDialog(
     release: UiAdminRelease?,
     onDismiss: () -> Unit,
-    onPublish: (Int, String, String, String, String?, Int, String) -> Unit,
-    onEdit: (String, Boolean, Int, String) -> Unit,
+    onPublish: (Int, String, String, String, String?, Int, String, Boolean) -> Unit,
+    onEdit: (String, Boolean, Int, String, Boolean) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     val c = MaterialTheme.colorScheme
     var code by remember(release?.id) { mutableStateOf("") }
@@ -1662,6 +1671,8 @@ private fun ReleaseDialog(
     var notes by remember(release?.id) { mutableStateOf("") }
     var channel by remember(release?.id) { mutableStateOf("stable") }
     var on by remember(release?.id) { mutableStateOf(release?.enabled ?: true) }
+    var mandatory by remember(release?.id) { mutableStateOf(release?.mandatory ?: false) }
+    var armedDelete by remember(release?.id) { mutableStateOf(false) }
     var percent by remember(release?.id) { mutableStateOf((release?.percent ?: 100).toString()) }
     var audience by remember(release?.id) { mutableStateOf(release?.audience ?: "all") }
     val percentValue = percent.toIntOrNull()?.takeIf { it in 0..100 }
@@ -1710,6 +1721,9 @@ private fun ReleaseDialog(
                         Text(if (on) stringResource(Res.string.rollout_turn_off) else stringResource(Res.string.rollout_turn_on))
                     }
                 }
+                TextButton(onClick = { mandatory = !mandatory }) {
+                    Text(if (mandatory) stringResource(Res.string.release_mandatory_on) else stringResource(Res.string.release_mandatory_off))
+                }
                 OutlinedTextField(
                     value = percent,
                     onValueChange = { percent = it.filter { ch -> ch.isDigit() }.take(3) },
@@ -1724,6 +1738,19 @@ private fun ReleaseDialog(
                 TextButton(onClick = { audience = if (audience == "all") "verified" else "all" }) {
                     Text(audienceLabel(audience))
                 }
+                if (release != null) {
+                    TextButton(
+                        onClick = {
+                            // Two taps: the first arms it, the second removes the build.
+                            if (armedDelete) onDelete(release.id) else armedDelete = true
+                        },
+                    ) {
+                        Text(
+                            if (armedDelete) stringResource(Res.string.release_delete_confirm) else stringResource(Res.string.release_delete),
+                            color = c.error,
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1733,9 +1760,9 @@ private fun ReleaseDialog(
                     val p = percentValue ?: return@TextButton
                     if (release == null) {
                         val version = codeValue ?: return@TextButton
-                        onPublish(version, name.trim(), channel, url.trim(), notes.trim().takeIf { it.isNotEmpty() }, p, audience)
+                        onPublish(version, name.trim(), channel, url.trim(), notes.trim().takeIf { it.isNotEmpty() }, p, audience, mandatory)
                     } else {
-                        onEdit(release.id, on, p, audience)
+                        onEdit(release.id, on, p, audience, mandatory)
                     }
                 },
             ) { Text(stringResource(Res.string.rollout_save)) }
