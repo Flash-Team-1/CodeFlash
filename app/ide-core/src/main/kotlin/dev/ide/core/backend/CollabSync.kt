@@ -168,9 +168,10 @@ internal class CollabSync(
                 if (out.size >= MAX_FILES) return
                 val path = if (rel.isEmpty()) f.name else "$rel/${f.name}"
                 if (f.isDirectory) {
-                    if (f.name.startsWith(".") || f.name in EXCLUDED_DIRS) continue
+                    // .platform holds the project's own settings, so it is shared; everything else hidden is not.
+                    if ((f.name.startsWith(".") && f.name != PLATFORM_DIR) || f.name in EXCLUDED_DIRS) continue
                     walk(f, path)
-                } else if (f.isFile && isSharable(f.name) && f.length() <= MAX_FILE_BYTES) {
+                } else if (f.isFile && isSharable(f.name) && path !in DEVICE_ONLY_FILES && f.length() <= MAX_FILE_BYTES) {
                     readText(f)?.let { out[path] = it }
                 }
             }
@@ -243,6 +244,9 @@ internal class CollabSync(
         const val STATE_FILE = ".codeassist/collab/state.properties"
         const val BASE_DIR = ".codeassist/collab/base"
         const val LIVE_DIR = ".codeassist/collab/live"
+        const val PLATFORM_DIR = ".platform"
+        /** Settings that describe one device (its SDK locations), so they are never shared. */
+        val DEVICE_ONLY_FILES = setOf("$PLATFORM_DIR/sdks.json")
         const val MAX_FILES = 2000
         const val MAX_FILE_BYTES = 512L * 1024
         val EXCLUDED_DIRS = setOf("build", "out", "node_modules")
