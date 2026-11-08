@@ -335,6 +335,12 @@ class StoreModeration(private val moderation: StoreModerationService) {
             else -> emptyList()
         }
 
+    fun collabCandidates(projectId: String): List<dev.ide.ui.backend.UiCollabCandidate> =
+        when (val r = moderation.collabCandidates(projectId)) {
+            is StoreResult.Ok -> r.value.map { dev.ide.ui.backend.UiCollabCandidate(it.id, it.handle, it.displayName) }
+            else -> emptyList()
+        }
+
     fun collabCommitDetail(commitId: String): List<dev.ide.ui.backend.UiCollabDiff> =
         when (val r = moderation.collabCommitDetail(commitId)) {
             is StoreResult.Ok -> r.value.map { dev.ide.ui.backend.UiCollabDiff(it.path, it.change, it.before, it.after) }
