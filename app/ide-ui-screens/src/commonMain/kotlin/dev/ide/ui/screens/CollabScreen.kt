@@ -101,7 +101,7 @@ private const val MAX_DIFF_LINES = 400
 
 /** Shared projects: share this folder, join one shared with you, pull, push, invite, and read the history. */
 @Composable
-fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit) {
+fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit, onOpenProject: (String) -> Unit = {}) {
     val scope = rememberCoroutineScope()
     val sharedText = stringResource(Res.string.collab_shared_done)
     val joinedText = stringResource(Res.string.collab_joined)
@@ -137,6 +137,15 @@ fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit) 
     }
 
     // Runs one action, shows its result, and reloads everything the screen shows.
+    // Accepting makes a folder for the shared project, downloads it, and opens it in the editor.
+    suspend fun acceptShared(inv: UiCollabInvite): String? {
+        backend.store.collabRespond(inv.id, true)?.let { return it }
+        val folder = backend.projects.createSharedFolder(inv.projectName) ?: return "Could not create a folder for the project"
+        backend.store.collabJoin(folder, inv.projectId)?.let { return it }
+        onOpenProject(folder)
+        return null
+    }
+
     fun act(success: String, work: suspend () -> String?) {
         scope.launch {
             busy = true
@@ -260,7 +269,7 @@ fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit) 
                             color = c.onSurfaceVariant,
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { act(acceptedText) { backend.store.collabRespond(inv.id, true) } }, enabled = !busy) {
+                            Button(onClick = { act(acceptedText) { acceptShared(inv) } }, enabled = !busy) {
                                 Text(stringResource(Res.string.collab_accept))
                             }
                             OutlinedButton(onClick = { act(declinedText) { backend.store.collabRespond(inv.id, false) } }, enabled = !busy) {
