@@ -34,7 +34,7 @@ import dev.ide.ui.ads.LocalAds
 import dev.ide.ui.backend.AdHost
 import dev.ide.ui.backend.RemoteFeatures
 import dev.ide.ui.backend.UiAppUpdate
-import dev.ide.ui.screens.AppUpdateDialog
+import dev.ide.ui.screens.AppUpdateSheet
 import dev.ide.ui.backend.FileActions
 import dev.ide.ui.backend.IdeBackend
 import dev.ide.ui.backend.UiAccent
@@ -135,8 +135,8 @@ fun CodeAssistApp(
             availableUpdate = latest
         }
     }
-    availableUpdate?.takeIf { !updateDismissed }?.let { update ->
-        AppUpdateDialog(update, fileActions) { updateDismissed = true }
+    availableUpdate?.takeIf { it.mandatory || !updateDismissed }?.let { update ->
+        AppUpdateSheet(update, fileActions) { updateDismissed = true }
     }
     // A store link handed in from outside the app. Cleared through the host once acted on, so tapping the
     // same link again is a fresh null -> id change and opens it again.
