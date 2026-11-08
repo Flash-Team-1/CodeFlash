@@ -793,6 +793,7 @@ data class UiAdminRelease(
     val downloadUrl: String,
     val notes: String?,
     val publishedAt: String,
+    val mandatory: Boolean = false,
 )
 
 /** A build the app offers as an update. */
@@ -802,4 +803,5 @@ data class UiAppUpdate(
     val channel: String,
     val downloadUrl: String,
     val notes: String?,
+    val mandatory: Boolean = false,
 )
