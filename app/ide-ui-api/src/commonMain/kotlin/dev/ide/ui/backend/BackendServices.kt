@@ -1586,12 +1586,15 @@ interface StoreService {
     /** Publish a build for in-app update. Null on success, or the sentence to show. */
     suspend fun publishRelease(
         versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
-        percent: Int, audience: String,
+        percent: Int, audience: String, mandatory: Boolean,
     ): String? = "Not available in this build"
 
     /** Switch a build on or off, or change its rollout. Null on success, or the sentence to show. */
-    suspend fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String): String? =
+    suspend fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean?): String? =
         "Not available in this build"
+
+    /** Remove a build for good. Moderators only. */
+    suspend fun deleteRelease(id: String): String? = "Not available in this build"
 
     /** The features on for this install or account, by key. */
     suspend fun myFeatures(): Map<String, Boolean> = emptyMap()
