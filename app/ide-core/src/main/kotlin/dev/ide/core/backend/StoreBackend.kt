@@ -812,6 +812,32 @@ internal class StoreBackend(
     override suspend fun collabLog(projectId: String): List<dev.ide.ui.backend.UiCollabCommit> =
         withContext(storeIo) { moderationState.collabLog(projectId) }
 
+    private val collabSync: CollabSync by lazy {
+        CollabSync(
+            fetch = { id -> moderationState.collabPull(id) },
+            push = { id, base, message, files -> moderationState.collabCommit(id, base, message, files) },
+            create = { name, files -> moderationState.collabCreate(name, files) },
+        )
+    }
+
+    override suspend fun collabSyncStatus(rootPath: String): dev.ide.ui.backend.UiCollabStatus =
+        withContext(storeIo) { collabSync.status(java.io.File(rootPath)) }
+
+    override suspend fun collabShare(rootPath: String, name: String): dev.ide.ui.backend.UiCollabResult =
+        withContext(storeIo) { collabSync.share(java.io.File(rootPath), name) }
+
+    override suspend fun collabJoin(rootPath: String, projectId: String): String? =
+        withContext(storeIo) { collabSync.join(java.io.File(rootPath), projectId) }
+
+    override suspend fun collabSyncPull(rootPath: String): String? =
+        withContext(storeIo) { collabSync.pull(java.io.File(rootPath)) }
+
+    override suspend fun collabSyncPush(rootPath: String, message: String): String? =
+        withContext(storeIo) { collabSync.push(java.io.File(rootPath), message) }
+
+    override suspend fun collabCandidates(projectId: String): List<dev.ide.ui.backend.UiCollabCandidate> =
+        withContext(storeIo) { moderationState.collabCandidates(projectId) }
+
     override suspend fun collabCommitDetail(commitId: String): List<dev.ide.ui.backend.UiCollabDiff> =
         withContext(storeIo) { moderationState.collabCommitDetail(commitId) }
 
