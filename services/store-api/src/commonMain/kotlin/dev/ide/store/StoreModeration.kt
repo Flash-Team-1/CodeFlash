@@ -311,12 +311,16 @@ interface StoreModerationService {
     /** Publish a build for in-app update. [channel] is "stable" or "beta". */
     fun publishRelease(
         versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
-        percent: Int, audience: String,
+        percent: Int, audience: String, mandatory: Boolean = false,
     ): StoreResult<Unit> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
     /** Switch a build on or off, or change who gets it and how many. */
-    fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String): StoreResult<Unit> =
+    fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean? = null): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Remove a build for good. Moderators only. */
+    fun deleteRelease(id: String): StoreResult<Unit> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
     /** The features on for this caller, by key. [device] stands in for the account when nobody is signed in. */
@@ -375,6 +379,7 @@ data class AdminRelease(
     val downloadUrl: String,
     val notes: String?,
     val publishedAt: String,
+    val mandatory: Boolean = false,
 )
 
 /** A build the app can offer as an update. */
@@ -384,6 +389,7 @@ data class AppUpdate(
     val channel: String,
     val downloadUrl: String,
     val notes: String?,
+    val mandatory: Boolean = false,
 )
 
 /** A publisher's request for verification, waiting for an admin. */
