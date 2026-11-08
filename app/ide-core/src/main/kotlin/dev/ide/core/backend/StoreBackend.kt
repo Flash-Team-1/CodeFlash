@@ -784,6 +784,37 @@ internal class StoreBackend(
     override suspend fun latestUpdate(): dev.ide.ui.backend.UiAppUpdate? =
         withContext(storeIo) { moderationState.latestUpdate(updateDeviceId()) }
 
+    override suspend fun collabProjects(): List<dev.ide.ui.backend.UiCollabProject> =
+        withContext(storeIo) { moderationState.collabProjects() }
+
+    override suspend fun collabInvites(): List<dev.ide.ui.backend.UiCollabInvite> =
+        withContext(storeIo) { moderationState.collabInvites() }
+
+    override suspend fun collabCreate(name: String, files: List<dev.ide.ui.backend.UiCollabFile>): dev.ide.ui.backend.UiCollabResult =
+        withContext(storeIo) { moderationState.collabCreate(name, files) }
+
+    override suspend fun collabInvite(projectId: String, userId: String): String? =
+        withContext(storeIo) { moderationState.collabInvite(projectId, userId) }
+
+    override suspend fun collabRespond(inviteId: String, accept: Boolean): String? =
+        withContext(storeIo) { moderationState.collabRespond(inviteId, accept) }
+
+    override suspend fun collabPull(projectId: String): dev.ide.ui.backend.UiCollabSnapshot? =
+        withContext(storeIo) { moderationState.collabPull(projectId) }
+
+    override suspend fun collabCommit(
+        projectId: String,
+        baseCommit: String?,
+        message: String,
+        files: List<dev.ide.ui.backend.UiCollabFile>,
+    ): String? = withContext(storeIo) { moderationState.collabCommit(projectId, baseCommit, message, files) }
+
+    override suspend fun collabLog(projectId: String): List<dev.ide.ui.backend.UiCollabCommit> =
+        withContext(storeIo) { moderationState.collabLog(projectId) }
+
+    override suspend fun collabCommitDetail(commitId: String): List<dev.ide.ui.backend.UiCollabDiff> =
+        withContext(storeIo) { moderationState.collabCommitDetail(commitId) }
+
     override suspend fun managedPublishers(query: String?): dev.ide.ui.backend.UiPublisherPage =
         withContext(storeIo) { moderationState.publishers(query) }
 
