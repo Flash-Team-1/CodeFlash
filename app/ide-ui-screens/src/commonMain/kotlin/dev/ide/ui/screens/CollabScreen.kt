@@ -105,8 +105,6 @@ fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit) 
     val scope = rememberCoroutineScope()
     val sharedText = stringResource(Res.string.collab_shared_done)
     val joinedText = stringResource(Res.string.collab_joined)
-    val pulledText = stringResource(Res.string.collab_pulled)
-    val pushedText = stringResource(Res.string.collab_pushed)
     val invitedText = stringResource(Res.string.collab_invited)
     val acceptedText = stringResource(Res.string.collab_accepted)
     val declinedText = stringResource(Res.string.collab_declined)
@@ -119,18 +117,19 @@ fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit) 
     var notice by remember { mutableStateOf<String?>(null) }
     var noticeIsError by remember { mutableStateOf(false) }
     var reload by remember { mutableStateOf(0) }
-    var showPush by remember { mutableStateOf(false) }
-    var pushMessage by remember { mutableStateOf("") }
     var showInvite by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
     var commits by remember { mutableStateOf<List<UiCollabCommit>>(emptyList()) }
     var openCommit by remember { mutableStateOf<UiCollabCommit?>(null) }
     var diffs by remember { mutableStateOf<List<UiCollabDiff>>(emptyList()) }
+    // Only verified accounts can invite (the server checks it too); everyone else never sees the button.
+    var verified by remember { mutableStateOf(false) }
 
     LaunchedEffect(project.rootPath, reload) {
         status = backend.store.collabSyncStatus(project.rootPath)
         projects = backend.store.collabProjects()
         invites = backend.store.collabInvites()
+        verified = runCatching { backend.store.myProfile() }.getOrNull()?.verified == true
     }
     val projectId = status?.projectId
     LaunchedEffect(projectId, showHistory, reload) {
@@ -219,18 +218,10 @@ fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit) 
                         Text(stringResource(Res.string.collab_more_changes, changes.size - 40), style = MaterialTheme.typography.bodySmall)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = { act(pulledText) { backend.store.collabSyncPull(project.rootPath) } },
-                            enabled = !busy,
-                        ) { Text(stringResource(Res.string.collab_pull)) }
-                        Button(
-                            onClick = { pushMessage = ""; showPush = true },
-                            enabled = !busy && changes.isNotEmpty(),
-                        ) { Text(stringResource(Res.string.collab_push)) }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { showInvite = true }, enabled = !busy) {
-                            Text(stringResource(Res.string.collab_invite))
+                        if (verified) {
+                            OutlinedButton(onClick = { showInvite = true }, enabled = !busy) {
+                                Text(stringResource(Res.string.collab_invite))
+                            }
                         }
                         OutlinedButton(onClick = { showHistory = !showHistory }) {
                             Text(stringResource(Res.string.collab_history))
@@ -306,32 +297,7 @@ fun CollabScreen(backend: IdeBackend, project: ProjectInfo, onBack: () -> Unit) 
         }
     }
 
-    if (showPush) {
-        AlertDialog(
-            onDismissRequest = { showPush = false },
-            title = { Text(stringResource(Res.string.collab_push_title)) },
-            text = {
-                OutlinedTextField(
-                    value = pushMessage,
-                    onValueChange = { pushMessage = it.take(500) },
-                    label = { Text(stringResource(Res.string.collab_push_hint)) },
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = pushMessage.isNotBlank(),
-                    onClick = {
-                        val message = pushMessage.trim()
-                        showPush = false
-                        act(pushedText) { backend.store.collabSyncPush(project.rootPath, message) }
-                    },
-                ) { Text(stringResource(Res.string.collab_push)) }
-            },
-            dismissButton = { TextButton(onClick = { showPush = false }) { Text(stringResource(Res.string.collab_cancel)) } },
-        )
-    }
-
-    if (showInvite && projectId != null) {
+    if (showInvite && verified && projectId != null) {
         InviteSheet(
             backend = backend,
             projectId = projectId,
