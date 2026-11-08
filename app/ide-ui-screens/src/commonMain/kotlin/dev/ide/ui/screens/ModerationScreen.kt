@@ -1419,6 +1419,8 @@ private fun RejectPaymentDialog(
     )
 }
 
+private val featureKeyPattern = Regex("[a-z0-9-]{2,40}")
+
 @Composable
 private fun featureSummary(f: UiAdminFeature): String {
     val state = if (f.enabled) stringResource(Res.string.rollout_on) else stringResource(Res.string.rollout_off)
