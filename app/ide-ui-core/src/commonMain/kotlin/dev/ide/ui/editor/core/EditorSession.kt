@@ -348,6 +348,12 @@ class EditorSession(
     private val undoStack = ArrayDeque<UndoStep>()
     private val redoStack = ArrayDeque<UndoStep>()
     private var currentGroup: UndoStep? = null   // open while a batch accumulates into one step
+    /** A live collaboration link: told every local change as (start, end, text) in buffer offsets. */
+    var onLocalEdit: ((start: Int, end: Int, text: String) -> Unit)? = null
+
+    /** True while a collaborator's change is being applied: it is not sent back. */
+    private var applyingRemote = false
+
     private var applyingUndo = false             // suppress recording while undo/redo replays edits
     private var coalesceTyping = false           // may the next 1-char edit merge into the top step?
 
@@ -362,6 +368,32 @@ class EditorSession(
         var m = 0
         for (i in 0 until doc.lineCount) m = max(m, doc.lineLength(i))
         maxLineChars = m
+    }
+
+    /**
+     * Applies a change a collaborator made. It is not sent back. Undo history is dropped, because its offsets
+     * no longer match the text. The caret keeps its place in the text around the change.
+     */
+    fun applyRemoteEdit(start: Int, end: Int, text: String) {
+        val s = start.coerceIn(0, doc.length)
+        val e = end.coerceIn(s, doc.length)
+        val delta = text.length - (e - s)
+        fun map(o: Int): Int = when {
+            o <= s -> o
+            o >= e -> o + delta
+            else -> s
+        }
+        val sel = selection
+        val newSel = TextRange(map(sel.start), map(sel.end))
+        applyingRemote = true
+        try {
+            replaceRange(s, e, text, newSel)
+        } finally {
+            applyingRemote = false
+        }
+        undoStack.clear()
+        redoStack.clear()
+        coalesceTyping = false
     }
 
     // ---- core mutation ----
@@ -395,6 +427,7 @@ class EditorSession(
         goalColumn = -1
         editCount++
         textRevision++
+        if (!applyingRemote) onLocalEdit?.invoke(s, e, text)
         val edit = EditSpan(s, e - s, text.length)
         // Diagnostics are spans anchored to this buffer, so the editor shifts them here — in place, in apply
         // order (multi-edit ops re-map each diagnostic correctly), O(diagnostics), no String diff. Just like
