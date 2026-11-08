@@ -306,7 +306,12 @@ private fun AppRoute(
         Screen.Collab -> {
             val target = app.collabTarget
             if (target != null) {
-                CollabScreen(backend = backend, project = target, onBack = app::finishCollab)
+                CollabScreen(
+                    backend = backend,
+                    project = target,
+                    onBack = app::finishCollab,
+                    onOpenProject = { path -> app.openSharedProject(path) },
+                )
             }
         }
 
