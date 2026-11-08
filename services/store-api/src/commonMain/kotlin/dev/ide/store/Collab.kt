@@ -40,3 +40,6 @@ data class CollabCommit(
 
 /** Before and after text for one file in a commit. Null on the side where the file does not exist. */
 data class CollabDiff(val path: String, val change: String, val before: String?, val after: String?)
+
+/** Someone the signed-in account may invite: mutual, verified, not in the project yet. */
+data class CollabCandidate(val id: String, val handle: String?, val displayName: String)
