@@ -815,7 +815,11 @@ internal class StoreBackend(
         withContext(storeIo) { moderationState.collabLog(projectId) }
 
     private val liveManager: CollabLiveManager by lazy {
-        CollabLiveManager(url = { moderationService.realtimeUrl() }, token = { moderationService.accessToken() })
+        CollabLiveManager(
+            url = { moderationService.realtimeUrl() },
+            token = { moderationService.accessToken() },
+            saveFile = { projectId, path, text -> moderationState.collabSaveFile(projectId, path, text) == null },
+        )
     }
 
     init {
@@ -828,6 +832,7 @@ internal class StoreBackend(
             fetch = { id -> moderationState.collabPull(id) },
             push = { id, base, message, files -> moderationState.collabCommit(id, base, message, files) },
             create = { name, files -> moderationState.collabCreate(name, files) },
+            working = { id -> moderationState.collabWorkingFiles(id) },
         )
     }
 
