@@ -196,7 +196,7 @@ internal class StoreBackend(
         // from, so the memoized feed is now describing the store as it was before this install.
         feedCache.clear()
         if (!source.configured()) return
-        val installId = ctx.manager?.preference(INSTALL_ID_PREF) ?: return
+        val installId = storeInstallId() ?: return
         runCatching { source.recordInstall(id, installId) }
     }
 
@@ -314,7 +314,7 @@ internal class StoreBackend(
      * subscribe — that is a real answer, not a failure to hide.
      */
     override suspend fun setLaunchNotification(enabled: Boolean): String? = withContext(storeIo) {
-        val installId = ctx.manager?.preference(INSTALL_ID_PREF)
+        val installId = storeInstallId()
             ?: return@withContext "This build has no install id to register"
         val token = ctx.manager?.preference(PUSH_TOKEN_PREF)
             ?: return@withContext "Push isn't set up on this device yet"
@@ -764,7 +764,19 @@ internal class StoreBackend(
         withContext(storeIo) { moderationState.deleteRelease(id) }
 
     /** The per-install id the feature and update checks are keyed by when nobody is signed in. */
-    private fun updateDeviceId(): String? = ctx.manager?.preference(INSTALL_ID_PREF)
+    private fun updateDeviceId(): String? = storeInstallId()
+
+    /**
+     * The per-install id the store counts installs and picks rollouts with. Made here when nothing has made one
+     * yet, so counting does not depend on analytics being enabled for this build. Analytics reads the same key.
+     */
+    private fun storeInstallId(): String? {
+        val m = ctx.manager ?: return null
+        m.preference(INSTALL_ID_PREF)?.takeIf { it.isNotBlank() }?.let { return it }
+        val fresh = java.util.UUID.randomUUID().toString()
+        m.setPreference(INSTALL_ID_PREF, fresh)
+        return fresh
+    }
 
     override suspend fun myFeatures(): Map<String, Boolean> =
         withContext(storeIo) { moderationState.myFeatures(updateDeviceId()) }
