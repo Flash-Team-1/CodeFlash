@@ -46,6 +46,8 @@ internal class CollabLiveManager(
     token: () -> String?,
     private val saveFile: (projectId: String, path: String, content: String) -> Boolean = { _, _, _ -> false },
 ) {
+    private data class OpenRef(val root: String, val rel: String)
+
     private class LiveDoc(
         val projectId: String,
         val root: String,
@@ -57,6 +59,8 @@ internal class CollabLiveManager(
     private val site = UUID.randomUUID().toString()
     private val docs = ConcurrentHashMap<String, LiveDoc>()   // read from pull checks on other threads
     private val keyBySession = HashMap<EditorSession, String>() // UI thread only
+    // Every file open in the editor, live or not. The background sync leaves these alone.
+    private val openRefs = java.util.concurrent.ConcurrentHashMap<EditorSession, OpenRef>()
     private val saveJobs = HashMap<String, Job>()              // UI thread only: pending auto-saves
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val rt = CollabRealtime(url, token, scope) { topic, event, payload ->
@@ -74,6 +78,7 @@ internal class CollabLiveManager(
         val root = findRoot(file) ?: return
         val rootPath = root.canonicalPath
         val rel = file.canonicalFile.relativeTo(root.canonicalFile).invariantSeparatorsPath
+        openRefs[session] = OpenRef(rootPath, rel)
         val projectId = readProjectId(root) ?: return
         // The text the server holds for this file, as last synced or auto-saved from this device.
         val live = File(root, "$LIVE_DIR/$rel")
@@ -98,7 +103,12 @@ internal class CollabLiveManager(
         })
     }
 
+    /** Paths, relative to the folder at [rootPath], of the files open in the editor. */
+    fun openPaths(rootPath: String): Set<String> =
+        openRefs.values.filter { it.root == rootPath }.map { it.rel }.toSet()
+
     fun detach(path: String, session: EditorSession) {
+        openRefs.remove(session)
         val key = keyBySession.remove(session) ?: return
         val doc = docs.remove(key) ?: return
         session.onLocalEdit = null
