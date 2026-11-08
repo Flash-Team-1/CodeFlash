@@ -324,6 +324,17 @@ class StoreModeration(private val moderation: StoreModerationService) {
         files: List<dev.ide.ui.backend.UiCollabFile>,
     ): String? = collabError(moderation.collabCommit(projectId, baseCommit, message, files.map { dev.ide.store.CollabFile(it.path, it.content) }))
 
+    /** Null when the file is saved; otherwise the sentence to show. */
+    fun collabSaveFile(projectId: String, path: String, content: String?): String? =
+        collabError(moderation.collabSaveFile(projectId, path, content))
+
+    /** The latest saved text of each file, or null when the server cannot be reached. */
+    fun collabWorkingFiles(projectId: String): List<UiCollabFile>? =
+        when (val r = moderation.collabWorkingFiles(projectId)) {
+            is StoreResult.Ok -> r.value.map { UiCollabFile(it.path, it.content) }
+            else -> null
+        }
+
     fun collabLog(projectId: String): List<dev.ide.ui.backend.UiCollabCommit> =
         when (val r = moderation.collabLog(projectId)) {
             is StoreResult.Ok -> r.value.map { c ->
