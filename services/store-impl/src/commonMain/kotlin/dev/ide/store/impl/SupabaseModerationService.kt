@@ -596,6 +596,21 @@ class SupabaseModerationService(
         }
     }
 
+    override fun collabSaveFile(projectId: String, path: String, content: String?): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val contentJson = if (content == null) "null" else q(content)
+        val body = """{"p_project":${q(projectId)},"p_path":${q(path)},"p_content":$contentJson}"""
+        return collabCall("collab_save_file", body, token) { _ -> Unit }
+    }
+
+    override fun collabWorkingFiles(projectId: String): StoreResult<List<CollabFile>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val body = """{"p_project":${q(projectId)}}"""
+        return collabCall("collab_working_files", body, token) { v ->
+            JsonReader.arr(v).mapNotNull { f -> JsonReader.str(f, "path")?.let { CollabFile(it, JsonReader.str(f, "content")) } }
+        }
+    }
+
     override fun collabCommit(projectId: String, baseCommit: String?, message: String, files: List<CollabFile>): StoreResult<Int> {
         val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
         val body = """{"p_project":${q(projectId)},"p_base":${baseCommit?.let { q(it) } ?: "null"},""" +
