@@ -22,6 +22,7 @@ internal class CollabSync(
     private val fetch: suspend (String) -> UiCollabSnapshot?,
     private val push: suspend (String, String?, String, List<UiCollabFile>) -> String?,
     private val create: suspend (String, List<UiCollabFile>) -> UiCollabResult,
+    private val working: suspend (String) -> List<UiCollabFile>? = { null },
 ) {
     fun status(root: File): UiCollabStatus {
         val state = readState(root) ?: return UiCollabStatus(null, null, emptyList())
@@ -56,7 +57,8 @@ internal class CollabSync(
     suspend fun pull(root: File): String? {
         val state = readState(root) ?: return NOT_LINKED
         val snap = fetch(state.projectId) ?: return UNREACHABLE
-        return merge(root, state.projectId, snap)
+        merge(root, state.projectId, snap)?.let { return it }
+        return syncWorking(root, state.projectId)
     }
 
     suspend fun push(root: File, message: String): String? {
@@ -64,6 +66,8 @@ internal class CollabSync(
         val snap = fetch(state.projectId) ?: return UNREACHABLE
         // The shared project moved since the last sync: bring the non-clashing changes in first.
         if (snap.headCommit != state.baseCommit) merge(root, state.projectId, snap)?.let { return it }
+        // Auto-saved edits are part of the project too: take them in before diffing, so a push never reverts them.
+        syncWorking(root, state.projectId)?.let { return it }
         val local = listLocal(root)
         val changes = diff(local, readBase(root))
         if (changes.isEmpty()) return "Nothing changed since the last sync"
@@ -73,6 +77,42 @@ internal class CollabSync(
         writeBase(root, local)
         writeState(root, state.projectId, snap.headCommit)
         return null
+    }
+
+    /**
+     * Brings the latest auto-saved text into the folder. A file this device has not changed is replaced;
+     * an unsaved local edit is kept; a file changed on both sides is reported and left alone.
+     * Also records, per file, the text the server holds, which is what a live editing session starts from.
+     */
+    private suspend fun syncWorking(root: File, projectId: String): String? {
+        val files = working(projectId) ?: return null
+        val base = readBase(root)
+        val live = HashMap(base)
+        val clashes = mutableListOf<String>()
+        for (f in files) {
+            val w = f.content ?: continue
+            if (!safePath(f.path)) continue
+            val l = readText(File(root, f.path))
+            val b = base[f.path]
+            when {
+                l == w -> live[f.path] = w
+                l == b -> { writeFile(File(root, f.path), w); live[f.path] = w }
+                w == b -> live[f.path] = b ?: w
+                else -> clashes += f.path
+            }
+        }
+        if (clashes.isNotEmpty()) {
+            return "Changed here and on the shared project, so nothing was pulled: " +
+                clashes.sorted().joinToString(", ") + ". Copy your version aside, then pull again."
+        }
+        writeLive(root, live)
+        return null
+    }
+
+    private fun writeLive(root: File, files: Map<String, String>) {
+        val dir = File(root, LIVE_DIR)
+        dir.deleteRecursively()
+        for ((path, text) in files) writeFile(File(dir, path), text)
     }
 
     /** Applies the shared changes that do not touch a file changed here. Nothing is written when any file clashes. */
@@ -199,6 +239,7 @@ internal class CollabSync(
     private companion object {
         const val STATE_FILE = ".codeassist/collab/state.properties"
         const val BASE_DIR = ".codeassist/collab/base"
+        const val LIVE_DIR = ".codeassist/collab/live"
         const val MAX_FILES = 2000
         const val MAX_FILE_BYTES = 512L * 1024
         val EXCLUDED_DIRS = setOf("build", "out", "node_modules")
