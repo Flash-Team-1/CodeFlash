@@ -1,5 +1,7 @@
 package dev.ide.ui
 
+import dev.ide.ui.collab.CollabLive
+
 import dev.ide.ui.backend.UiFeatures
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -151,6 +153,10 @@ class OpenFile(
     val tabId: Long = nextTabId(),
 ) {
     val session = EditorSession(initial, languageFor(name), editable = !readOnly)
+    init {
+        if (!readOnly) CollabLive.opened(path, session)
+    }
+
     var modified by mutableStateOf(false)
         private set
 
@@ -1307,6 +1313,7 @@ class IdeUiState(
         if (idx < 0) return
         openFiles.removeAt(idx)
         activeIndex = activeIndex.coerceAtMost(openFiles.lastIndex)
+        CollabLive.closed(file.path, file.session)
         closedTabs.addLast(file.path to file.name)
         while (closedTabs.size > CLOSED_TAB_LIMIT) closedTabs.removeFirst()
         backend.editor.onFileClosed(file.path)
