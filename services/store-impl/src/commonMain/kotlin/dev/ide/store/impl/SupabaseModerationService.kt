@@ -630,6 +630,11 @@ class SupabaseModerationService(
         }
     }
 
+    override fun realtimeUrl(): String? =
+        base.replace("https://", "wss://").replace("http://", "ws://") + "/realtime/v1/websocket?apikey=$apiKey&vsn=1.0.0"
+
+    override fun accessToken(): String? = accounts.bearer()
+
     /** One RPC: a server error is surfaced with its sentence, and an answer that does not parse is a failure. */
     private fun <T> collabCall(name: String, body: String, token: String, read: (Any?) -> T?): StoreResult<T> =
         when (val r = rpc(name, body, token)) {
