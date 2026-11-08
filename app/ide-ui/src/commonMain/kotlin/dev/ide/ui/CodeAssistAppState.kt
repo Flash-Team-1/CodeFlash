@@ -399,6 +399,7 @@ class CodeAssistAppState(
 
     /** The project whose Export dialog is open, and the picked package being previewed for import (path plus
      *  the read manifest/peek). Held here so they survive picker recompositions. */
+    var collabTarget: ProjectInfo? by mutableStateOf(null)
     var exportTarget: ProjectInfo? by mutableStateOf(null)
         private set
     var importArchivePath: String? by mutableStateOf(null)
@@ -801,6 +802,16 @@ class CodeAssistAppState(
     fun startExport(project: ProjectInfo) {
         exportTarget = project
         screen = Screen.ExportProject
+    }
+
+    fun startCollab(project: ProjectInfo) {
+        collabTarget = project
+        screen = Screen.Collab
+    }
+
+    fun finishCollab() {
+        collabTarget = null
+        screen = Screen.Projects
     }
 
     fun finishExport() {
@@ -1506,6 +1517,7 @@ class CodeAssistAppState(
             screen == Screen.CreateProject -> screen = Screen.Projects
             screen == Screen.ImportProject -> cancelImportPreview()
             screen == Screen.ExportProject -> finishExport()
+            screen == Screen.Collab -> finishCollab()
             // During a lesson Back leaves the lesson; the workspace is not a project the user opened.
             screen == Screen.Editor && lessonInEditor -> exitLessonEditor()
             screen == Screen.Editor -> confirmCloseProject = true
