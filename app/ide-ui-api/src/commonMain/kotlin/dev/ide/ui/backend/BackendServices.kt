@@ -861,6 +861,8 @@ interface ProjectService {
 
     /** Open the existing project rooted at [rootPath]; becomes active (bumps [projectEpoch]). */
     suspend fun openProject(rootPath: String): Boolean = false
+    /** A new, empty folder for a shared project under the projects root. Null when it cannot be made. */
+    suspend fun createSharedFolder(name: String): String? = null
 
     /** Permanently delete the project rooted at [rootPath] from disk. */
     suspend fun deleteProject(rootPath: String): Boolean = false
