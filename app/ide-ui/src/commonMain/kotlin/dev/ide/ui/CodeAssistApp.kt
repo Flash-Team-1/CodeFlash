@@ -135,9 +135,6 @@ fun CodeAssistApp(
             availableUpdate = latest
         }
     }
-    availableUpdate?.takeIf { it.mandatory || !updateDismissed }?.let { update ->
-        AppUpdateSheet(update, fileActions) { updateDismissed = true }
-    }
     // A store link handed in from outside the app. Cleared through the host once acted on, so tapping the
     // same link again is a fresh null -> id change and opens it again.
     LaunchedEffect(openStoreItemId) {
@@ -217,6 +214,10 @@ fun CodeAssistApp(
             // Occasional full-screen ad over a LONG build (Android only; inert on desktop / when ads are off).
             // Renders nothing — it just observes the build state and asks the host to present an interstitial.
             BuildAdInterstitial(backend, app.adController)
+            // The update sheet sits inside the app theme, so it takes the active colors and follows theme changes.
+            availableUpdate?.takeIf { it.mandatory || !updateDismissed }?.let { update ->
+                AppUpdateSheet(update, fileActions) { updateDismissed = true }
+            }
             // Mouse or touch, from the last pointer event, for the parts of the UI that size and reveal by pointer.
             PointerInputModeHost {
                 // App-wide shortcuts. At the root so they see a key on its way down (the switcher's modal keys,
