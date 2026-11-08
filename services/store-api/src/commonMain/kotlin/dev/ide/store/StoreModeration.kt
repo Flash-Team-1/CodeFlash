@@ -363,6 +363,10 @@ interface StoreModerationService {
     fun collabLog(projectId: String, limit: Int = 30): StoreResult<List<CollabCommit>> =
         StoreResult.Unavailable("Collaboration is not available in this build")
 
+    /** People the signed-in account can invite to [projectId] right now. */
+    fun collabCandidates(projectId: String): StoreResult<List<CollabCandidate>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
     /** Per-file before and after for one commit. */
     fun collabCommitDetail(commitId: String): StoreResult<List<CollabDiff>> =
         StoreResult.Unavailable("Collaboration is not available in this build")
