@@ -54,20 +54,21 @@ internal class CollabSync(
         return pull(root)
     }
 
-    suspend fun pull(root: File): String? {
+    /** [skip]: files the editor has open. They are left as they are until they are closed. */
+    suspend fun pull(root: File, skip: Set<String> = emptySet()): String? {
         val state = readState(root) ?: return NOT_LINKED
         val snap = fetch(state.projectId) ?: return UNREACHABLE
-        merge(root, state.projectId, snap)?.let { return it }
-        return syncWorking(root, state.projectId)
+        merge(root, state.projectId, snap, skip)?.let { return it }
+        return syncWorking(root, state.projectId, skip)
     }
 
     suspend fun push(root: File, message: String): String? {
         val state = readState(root) ?: return NOT_LINKED
         val snap = fetch(state.projectId) ?: return UNREACHABLE
         // The shared project moved since the last sync: bring the non-clashing changes in first.
-        if (snap.headCommit != state.baseCommit) merge(root, state.projectId, snap)?.let { return it }
+        if (snap.headCommit != state.baseCommit) merge(root, state.projectId, snap, emptySet())?.let { return it }
         // Auto-saved edits are part of the project too: take them in before diffing, so a push never reverts them.
-        syncWorking(root, state.projectId)?.let { return it }
+        syncWorking(root, state.projectId, emptySet())?.let { return it }
         val local = listLocal(root)
         val changes = diff(local, readBase(root))
         if (changes.isEmpty()) return "Nothing changed since the last sync"
@@ -84,14 +85,16 @@ internal class CollabSync(
      * an unsaved local edit is kept; a file changed on both sides is reported and left alone.
      * Also records, per file, the text the server holds, which is what a live editing session starts from.
      */
-    private suspend fun syncWorking(root: File, projectId: String): String? {
+    private suspend fun syncWorking(root: File, projectId: String, skip: Set<String>): String? {
         val files = working(projectId) ?: return null
         val base = readBase(root)
         val live = HashMap(base)
+        // A file open in the editor keeps the live text it had: the server copy is not written under it.
+        for (p in skip) readText(File(File(root, LIVE_DIR), p))?.let { live[p] = it }
         val clashes = mutableListOf<String>()
         for (f in files) {
             val w = f.content ?: continue
-            if (!safePath(f.path)) continue
+            if (!safePath(f.path) || f.path in skip) continue
             val l = readText(File(root, f.path))
             val b = base[f.path]
             when {
@@ -116,11 +119,11 @@ internal class CollabSync(
     }
 
     /** Applies the shared changes that do not touch a file changed here. Nothing is written when any file clashes. */
-    private fun merge(root: File, projectId: String, snap: UiCollabSnapshot): String? {
+    private fun merge(root: File, projectId: String, snap: UiCollabSnapshot, skip: Set<String>): String? {
         val remote = snap.files.associate { it.path to it.content.orEmpty() }
         val base = readBase(root)
         val local = listLocal(root)
-        val remoteChanged = (remote.keys + base.keys).filter { remote[it] != base[it] }.toSet()
+        val remoteChanged = (remote.keys + base.keys).filter { remote[it] != base[it] && it !in skip }.toSet()
         val localChanged = (local.keys + base.keys).filter { local[it] != base[it] }.toSet()
         remoteChanged.firstOrNull { !safePath(it) }?.let { return "The shared project has a file with an unsafe path: $it" }
         val clash = remoteChanged.intersect(localChanged).filter { local[it] != remote[it] }.sorted()
