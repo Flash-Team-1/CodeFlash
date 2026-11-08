@@ -1628,6 +1628,25 @@ interface StoreService {
     /** Commit history of a project, newest first. */
     suspend fun collabLog(projectId: String): List<UiCollabCommit> = emptyList()
 
+    /** The sync state of a project folder: the linked project, the version last synced, and what changed since. */
+    suspend fun collabSyncStatus(rootPath: String): UiCollabStatus = UiCollabStatus(null, null, emptyList())
+
+    /** Shares a folder as a new project. The result's id is the project id. */
+    suspend fun collabShare(rootPath: String, name: String): UiCollabResult =
+        UiCollabResult(null, "Not available in this build")
+
+    /** Links a folder to a shared project that already exists, then pulls it. Null when it went. */
+    suspend fun collabJoin(rootPath: String, projectId: String): String? = "Not available in this build"
+
+    /** Brings the shared version into a linked folder. Null when it went. */
+    suspend fun collabSyncPull(rootPath: String): String? = "Not available in this build"
+
+    /** Sends this folder's changes to the shared project. Null when it went. */
+    suspend fun collabSyncPush(rootPath: String, message: String): String? = "Not available in this build"
+
+    /** People the account can invite to [projectId] right now. */
+    suspend fun collabCandidates(projectId: String): List<UiCollabCandidate> = emptyList()
+
     /** Per-file before and after for one commit. */
     suspend fun collabCommitDetail(commitId: String): List<UiCollabDiff> = emptyList()
 
