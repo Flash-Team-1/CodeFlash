@@ -37,3 +37,9 @@ data class UiCollabDiff(val path: String, val change: String, val before: String
 
 /** The outcome of an action that creates something: the new id, or the sentence to show when it failed. */
 data class UiCollabResult(val id: String?, val error: String?)
+
+/** Someone the account can invite to a project. */
+data class UiCollabCandidate(val id: String, val handle: String?, val displayName: String)
+
+/** A project folder's sync state: the project it is linked to (null when not shared), the version it last synced, and what changed since. */
+data class UiCollabStatus(val projectId: String?, val baseCommit: String?, val changes: List<UiCollabChange>)
