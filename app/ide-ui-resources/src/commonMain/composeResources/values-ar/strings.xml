@@ -2931,4 +2931,10 @@
     <string name="release_empty">مفيش نسخ منشورة لسه.</string>
     <string name="release_card">النسخة %1$s (%2$d)</string>
     <string name="release_edit">تعديل</string>
+    <string name="release_required_badge">إجباري</string>
+    <string name="release_mandatory_on">تحديث إجباري: شغال</string>
+    <string name="release_mandatory_off">تحديث إجباري: مش شغال</string>
+    <string name="release_delete">امسح النسخة</string>
+    <string name="release_delete_confirm">اضغط تاني عشان تأكد الحذف</string>
+    <string name="update_mandatory_note">التحديث ده إجباري عشان تقدر تكمل تستخدم التطبيق.</string>
 </resources>
