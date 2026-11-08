@@ -109,6 +109,7 @@ import dev.ide.ui.generated.resources.home_import_project
 import dev.ide.ui.generated.resources.home_legacy_recovery
 import dev.ide.ui.generated.resources.home_open_in_files
 import dev.ide.ui.generated.resources.home_settings_tools
+import dev.ide.ui.generated.resources.collab_menu
 import dev.ide.ui.generated.resources.home_share
 import dev.ide.ui.generated.resources.home_sponsor
 import dev.ide.ui.generated.resources.home_star_github
@@ -214,6 +215,7 @@ fun ProjectsHomeScreen(
     onImportProject: (() -> Unit)? = null,
     onCloneRepository: (() -> Unit)? = null,
     onExportProject: ((ProjectInfo) -> Unit)? = null,
+    onCollabProject: ((ProjectInfo) -> Unit)? = null,
     onBackup: (() -> Unit)? = null,
     onOpenHub: (() -> Unit)? = null,
     onSubmitSuggestions: (() -> Unit)? = null,
@@ -306,6 +308,7 @@ fun ProjectsHomeScreen(
             onImportProject = onImportProject,
             onCloneRepository = onCloneRepository,
             onExportProject = onExportProject,
+            onCollabProject = onCollabProject,
             onRequestDelete = onDeleteProject?.let { { project: ProjectInfo -> pendingDelete = project } },
             onRequestRename = onRenameProject?.let { { project: ProjectInfo -> pendingRename = project } },
             showLegacyRecovery = showLegacyRecovery,
@@ -414,6 +417,7 @@ fun ProjectsHomeScreen(
                             null
                         },
                         onRename = onRenameProject?.let { { pendingRename = project } },
+                        onCollab = onCollabProject?.let { collab -> { collab(project) } },
                     )
                 }
             } else {
@@ -760,6 +764,7 @@ private fun LocalProjectCard(
      */
     onDelete: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
+    onCollab: (() -> Unit)? = null,
 ) {
     var menuOpen by remember(project.rootPath) { mutableStateOf(false) }
     val c = MaterialTheme.colorScheme
@@ -818,7 +823,7 @@ private fun LocalProjectCard(
                 )
             }
             // Everything that is not "open this project" lives behind one control. Tapping the row opens.
-            if (onDelete != null || onSecondary != null || onRename != null) {
+            if (onDelete != null || onSecondary != null || onRename != null || onCollab != null) {
                 Box {
                     IconButtonCa(
                         CaIcons.ellipsis,
@@ -839,6 +844,12 @@ private fun LocalProjectCard(
                                     )
                                 },
                                 onClick = { menuOpen = false; onSecondary() },
+                            )
+                        }
+                        if (onCollab != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.collab_menu)) },
+                                onClick = { menuOpen = false; onCollab() },
                             )
                         }
                         if (onRename != null) {
@@ -1352,6 +1363,7 @@ private fun WideProjectsHome(
     onImportProject: (() -> Unit)?,
     onCloneRepository: (() -> Unit)?,
     onExportProject: ((ProjectInfo) -> Unit)?,
+    onCollabProject: ((ProjectInfo) -> Unit)?,
     onRequestDelete: ((ProjectInfo) -> Unit)?,
     onRequestRename: ((ProjectInfo) -> Unit)?,
     showLegacyRecovery: Boolean,
@@ -1460,6 +1472,7 @@ private fun WideProjectsHome(
                         showKind = showKind,
                         onOpen = { onOpen(project) },
                         onShare = onExportProject?.let { export -> { export(project) } },
+                        onCollab = onCollabProject?.let { collab -> { collab(project) } },
                         onDelete = onRequestDelete?.let { request -> { request(project) } },
                         onRename = onRequestRename?.let { request -> { request(project) } },
                     )
@@ -1553,6 +1566,7 @@ private fun DenseProjectRow(
     showKind: Boolean,
     onOpen: () -> Unit,
     onShare: (() -> Unit)?,
+    onCollab: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     onRename: (() -> Unit)?,
 ) {
@@ -1612,10 +1626,13 @@ private fun DenseProjectRow(
             textAlign = TextAlign.End,
             modifier = Modifier.width(110.dp),
         )
-        if (onShare != null || onDelete != null || onRename != null) {
+        if (onShare != null || onCollab != null || onDelete != null || onRename != null) {
             Box(Modifier.alpha(if (hovered || menuOpen || touchInput) 1f else 0f)) {
                 IconButtonCa(CaIcons.ellipsis, stringResource(Res.string.home_more_actions), { menuOpen = true }, iconSize = 18, boxSize = 36)
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (onCollab != null) {
+                        DropdownMenuItem(text = { Text(stringResource(Res.string.collab_menu)) }, onClick = { menuOpen = false; onCollab() })
+                    }
                     if (onShare != null) {
                         DropdownMenuItem(text = { Text(stringResource(Res.string.home_share)) }, onClick = { menuOpen = false; onShare() })
                     }
