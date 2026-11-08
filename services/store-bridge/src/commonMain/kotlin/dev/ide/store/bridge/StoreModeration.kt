@@ -225,7 +225,7 @@ class StoreModeration(private val moderation: StoreModerationService) {
             is StoreResult.Ok -> r.value.map {
                 dev.ide.ui.backend.UiAdminRelease(
                     it.id, it.versionCode, it.versionName, it.channel, it.enabled, it.percent, it.audience,
-                    it.downloadUrl, it.notes, it.publishedAt,
+                    it.downloadUrl, it.notes, it.publishedAt, it.mandatory,
                 )
             }
             else -> emptyList()
@@ -234,17 +234,25 @@ class StoreModeration(private val moderation: StoreModerationService) {
     /** Null when it went; otherwise the sentence to show. */
     fun publishRelease(
         versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
-        percent: Int, audience: String,
+        percent: Int, audience: String, mandatory: Boolean,
     ): String? =
-        when (val r = moderation.publishRelease(versionCode, versionName, channel, downloadUrl, notes, percent, audience)) {
+        when (val r = moderation.publishRelease(versionCode, versionName, channel, downloadUrl, notes, percent, audience, mandatory)) {
             is StoreResult.Ok -> null
             is StoreResult.Unavailable -> r.reason
             is StoreResult.Failed -> r.message
         }
 
     /** Null when it went; otherwise the sentence to show. */
-    fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String): String? =
-        when (val r = moderation.setRelease(id, enabled, percent, audience)) {
+    fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean?): String? =
+        when (val r = moderation.setRelease(id, enabled, percent, audience, mandatory)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun deleteRelease(id: String): String? =
+        when (val r = moderation.deleteRelease(id)) {
             is StoreResult.Ok -> null
             is StoreResult.Unavailable -> r.reason
             is StoreResult.Failed -> r.message
@@ -261,7 +269,7 @@ class StoreModeration(private val moderation: StoreModerationService) {
     fun latestUpdate(device: String?): dev.ide.ui.backend.UiAppUpdate? =
         when (val r = moderation.latestUpdate(device)) {
             is StoreResult.Ok -> r.value?.let {
-                dev.ide.ui.backend.UiAppUpdate(it.versionCode, it.versionName, it.channel, it.downloadUrl, it.notes)
+                dev.ide.ui.backend.UiAppUpdate(it.versionCode, it.versionName, it.channel, it.downloadUrl, it.notes, it.mandatory)
             }
             else -> null
         }
