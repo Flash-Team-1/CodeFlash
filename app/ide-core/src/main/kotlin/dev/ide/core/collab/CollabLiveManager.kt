@@ -9,6 +9,7 @@ import dev.ide.ui.collab.VisibleEdit
 import dev.ide.ui.editor.core.EditorSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -43,6 +44,7 @@ import java.util.concurrent.ConcurrentHashMap
 internal class CollabLiveManager(
     url: () -> String?,
     token: () -> String?,
+    private val saveFile: (projectId: String, path: String, content: String) -> Boolean = { _, _, _ -> false },
 ) {
     private class LiveDoc(
         val projectId: String,
@@ -55,6 +57,7 @@ internal class CollabLiveManager(
     private val site = UUID.randomUUID().toString()
     private val docs = ConcurrentHashMap<String, LiveDoc>()   // read from pull checks on other threads
     private val keyBySession = HashMap<EditorSession, String>() // UI thread only
+    private val saveJobs = HashMap<String, Job>()              // UI thread only: pending auto-saves
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val rt = CollabRealtime(url, token, scope) { topic, event, payload ->
         CollabLive.onUi { onRemote(topic, event, payload) }
@@ -72,9 +75,10 @@ internal class CollabLiveManager(
         val rootPath = root.canonicalPath
         val rel = file.canonicalFile.relativeTo(root.canonicalFile).invariantSeparatorsPath
         val projectId = readProjectId(root) ?: return
-        val base = File(root, "$BASE_DIR/$rel")
-        if (!base.isFile) return
-        val baseText = base.readText(Charsets.UTF_8)
+        // The text the server holds for this file, as last synced or auto-saved from this device.
+        val live = File(root, "$LIVE_DIR/$rel")
+        if (!live.isFile) return
+        val baseText = live.readText(Charsets.UTF_8)
         // Unsaved or unpushed changes: stay offline for this file until they are pushed or pulled away.
         if (baseText != session.doc.text || baseText.length > MAX_LIVE_CHARS) return
 
@@ -98,6 +102,12 @@ internal class CollabLiveManager(
         val key = keyBySession.remove(session) ?: return
         val doc = docs.remove(key) ?: return
         session.onLocalEdit = null
+        // Flush the last pending save so nothing typed in the last moment is lost.
+        val last = session.doc.text
+        saveJobs.remove(key)?.let { job ->
+            job.cancel()
+            scope.launch { if (saveFile(doc.projectId, doc.path, last)) writeLive(doc.root, doc.path, last) }
+        }
         if (docs.values.none { it.projectId == doc.projectId }) rt.leave(topicOf(doc.projectId))
     }
 
@@ -118,6 +128,16 @@ internal class CollabLiveManager(
             put("path", doc.path)
             put("ops", buildJsonArray { ops.forEach { add(encodeOp(it)) } })
         })
+        scheduleSave(key, doc, doc.session.doc.text)
+    }
+
+    // Saves the whole file once typing pauses, so the server always has the latest text.
+    private fun scheduleSave(key: String, doc: LiveDoc, text: String) {
+        saveJobs.remove(key)?.cancel()
+        saveJobs[key] = scope.launch {
+            delay(SAVE_DELAY_MS)
+            if (saveFile(doc.projectId, doc.path, text)) writeLive(doc.root, doc.path, text)
+        }
     }
 
     private fun stop(key: String, doc: LiveDoc) {
@@ -249,6 +269,12 @@ internal class CollabLiveManager(
         return props.getProperty("projectId")?.takeIf { it.isNotBlank() }
     }
 
+    private fun writeLive(root: String, path: String, text: String) {
+        val f = File(root, "$LIVE_DIR/$path")
+        f.parentFile?.mkdirs()
+        f.writeText(text, Charsets.UTF_8)
+    }
+
     private fun keyOf(projectId: String, path: String) = "$projectId|$path"
     private fun topicOf(projectId: String) = "collab:$projectId"
 
@@ -256,7 +282,9 @@ internal class CollabLiveManager(
         const val EVENT = "collab"
         const val STATE_FILE = ".codeassist/collab/state.properties"
         const val BASE_DIR = ".codeassist/collab/base"
+        const val LIVE_DIR = ".codeassist/collab/live"
         /** Larger files do not go live: the whole state is sent to a newcomer, and that must fit one message. */
         const val MAX_LIVE_CHARS = 60_000
+        const val SAVE_DELAY_MS = 800L
     }
 }
