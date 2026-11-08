@@ -752,13 +752,16 @@ internal class StoreBackend(
 
     override suspend fun publishRelease(
         versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
-        percent: Int, audience: String,
+        percent: Int, audience: String, mandatory: Boolean,
     ): String? = withContext(storeIo) {
-        moderationState.publishRelease(versionCode, versionName, channel, downloadUrl, notes, percent, audience)
+        moderationState.publishRelease(versionCode, versionName, channel, downloadUrl, notes, percent, audience, mandatory)
     }
 
-    override suspend fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String): String? =
-        withContext(storeIo) { moderationState.setRelease(id, enabled, percent, audience) }
+    override suspend fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean?): String? =
+        withContext(storeIo) { moderationState.setRelease(id, enabled, percent, audience, mandatory) }
+
+    override suspend fun deleteRelease(id: String): String? =
+        withContext(storeIo) { moderationState.deleteRelease(id) }
 
     /** The per-install id the feature and update checks are keyed by when nobody is signed in. */
     private fun updateDeviceId(): String? = ctx.manager?.preference(INSTALL_ID_PREF)
