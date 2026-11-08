@@ -33,6 +33,8 @@ import dev.ide.ui.backend.UiStoreFeed
 import dev.ide.ui.backend.UiStoreSection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
+import dev.ide.core.collab.CollabLiveManager
+import dev.ide.ui.collab.CollabLive
 import kotlinx.coroutines.withContext
 
 /**
@@ -812,6 +814,15 @@ internal class StoreBackend(
     override suspend fun collabLog(projectId: String): List<dev.ide.ui.backend.UiCollabCommit> =
         withContext(storeIo) { moderationState.collabLog(projectId) }
 
+    private val liveManager: CollabLiveManager by lazy {
+        CollabLiveManager(url = { moderationService.realtimeUrl() }, token = { moderationService.accessToken() })
+    }
+
+    init {
+        CollabLive.attach = { path, session -> liveManager.attach(path, session) }
+        CollabLive.detach = { path, session -> liveManager.detach(path, session) }
+    }
+
     private val collabSync: CollabSync by lazy {
         CollabSync(
             fetch = { id -> moderationState.collabPull(id) },
@@ -829,8 +840,11 @@ internal class StoreBackend(
     override suspend fun collabJoin(rootPath: String, projectId: String): String? =
         withContext(storeIo) { collabSync.join(java.io.File(rootPath), projectId) }
 
-    override suspend fun collabSyncPull(rootPath: String): String? =
-        withContext(storeIo) { collabSync.pull(java.io.File(rootPath)) }
+    override suspend fun collabSyncPull(rootPath: String): String? {
+        // A pull rewrites files under the editor. Live files would drift from the editor, so pull waits.
+        if (liveManager.isLive(rootPath)) return "Close the files you are editing live before pulling"
+        return withContext(storeIo) { collabSync.pull(java.io.File(rootPath)) }
+    }
 
     override suspend fun collabSyncPush(rootPath: String, message: String): String? =
         withContext(storeIo) { collabSync.push(java.io.File(rootPath), message) }
