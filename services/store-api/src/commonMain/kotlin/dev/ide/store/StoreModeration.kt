@@ -363,6 +363,12 @@ interface StoreModerationService {
     fun collabLog(projectId: String, limit: Int = 30): StoreResult<List<CollabCommit>> =
         StoreResult.Unavailable("Collaboration is not available in this build")
 
+    /** The Realtime socket address for live editing, or null when the backend has none. */
+    fun realtimeUrl(): String? = null
+
+    /** The signed-in access token, or null when signed out. */
+    fun accessToken(): String? = null
+
     /** People the signed-in account can invite to [projectId] right now. */
     fun collabCandidates(projectId: String): StoreResult<List<CollabCandidate>> =
         StoreResult.Unavailable("Collaboration is not available in this build")
