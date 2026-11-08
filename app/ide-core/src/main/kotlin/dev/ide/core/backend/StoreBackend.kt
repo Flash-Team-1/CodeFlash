@@ -849,9 +849,8 @@ internal class StoreBackend(
             while (true) {
                 delay(SHARED_SYNC_MS)
                 for (root in sharedRoots.toList()) {
-                    // A live file is open in the editor: pulling would rewrite text under it, so wait.
-                    if (liveManager.isLive(root)) continue
-                    runCatching { collabSync.pull(java.io.File(root)) }
+                    // Files open in the editor are skipped, so no text changes under the user's cursor.
+                    runCatching { collabSync.pull(java.io.File(root), liveManager.openPaths(root)) }
                 }
             }
         }
