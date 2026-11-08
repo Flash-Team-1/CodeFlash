@@ -355,6 +355,14 @@ interface StoreModerationService {
     fun collabPull(projectId: String): StoreResult<CollabSnapshot> =
         StoreResult.Unavailable("Collaboration is not available in this build")
 
+    /** Saves one file of a shared project right away. A null [content] deletes it. Owner and editors only. */
+    fun collabSaveFile(projectId: String, path: String, content: String?): StoreResult<Unit> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** The latest saved text of every file in a shared project, including unsaved-to-commit edits. Members only. */
+    fun collabWorkingFiles(projectId: String): StoreResult<List<CollabFile>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
     /** Push on top of [baseCommit], which must still be the head. Returns how many files changed. */
     fun collabCommit(projectId: String, baseCommit: String?, message: String, files: List<CollabFile>): StoreResult<Int> =
         StoreResult.Unavailable("Collaboration is not available in this build")
