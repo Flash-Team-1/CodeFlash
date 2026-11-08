@@ -515,10 +515,11 @@ class SupabaseModerationService(
         return unit(rpc("store_admin_set_release", body, token))
     }
 
-    // These two are called without a signed-in account, so they use the public key the way the feed does.
+    // These two use the signed-in account's token when there is one, so verified-only rollouts can match it.
+    // Without a sign-in they fall back to the public key, which only reaches the all-users rollouts.
     override fun myFeatures(device: String?): StoreResult<Map<String, Boolean>> {
         val body = """{"p_device":${device?.let { q(it) } ?: "null"}}"""
-        return when (val r = request("POST", "$base/rest/v1/rpc/store_my_features", body, apiKey)) {
+        return when (val r = request("POST", "$base/rest/v1/rpc/store_my_features", body, accounts.bearer() ?: apiKey)) {
             is StoreResult.Ok -> StoreResult.Ok(
                 JsonReader.obj(JsonReader.parseOrNull(r.value))?.mapValues { it.value == true }.orEmpty(),
             )
@@ -529,7 +530,7 @@ class SupabaseModerationService(
 
     override fun latestUpdate(device: String?): StoreResult<AppUpdate?> {
         val body = """{"p_device":${device?.let { q(it) } ?: "null"}}"""
-        return when (val r = request("POST", "$base/rest/v1/rpc/store_latest_update", body, apiKey)) {
+        return when (val r = request("POST", "$base/rest/v1/rpc/store_latest_update", body, accounts.bearer() ?: apiKey)) {
             is StoreResult.Ok -> StoreResult.Ok(parseUpdate(JsonReader.parseOrNull(r.value)))
             is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
             is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
