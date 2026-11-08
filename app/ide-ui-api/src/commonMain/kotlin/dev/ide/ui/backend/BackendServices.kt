@@ -1602,6 +1602,35 @@ interface StoreService {
     /** The newest build this install is offered, or null. */
     suspend fun latestUpdate(): UiAppUpdate? = null
 
+    /** Shared projects the signed-in account belongs to. */
+    suspend fun collabProjects(): List<UiCollabProject> = emptyList()
+
+    /** Invites waiting for the signed-in account. */
+    suspend fun collabInvites(): List<UiCollabInvite> = emptyList()
+
+    /** Start a shared project from these files. Verified accounts only. */
+    suspend fun collabCreate(name: String, files: List<UiCollabFile>): UiCollabResult =
+        UiCollabResult(null, "Not available in this build")
+
+    /** Invite a mutual, verified follower. Null when it went. */
+    suspend fun collabInvite(projectId: String, userId: String): String? = "Not available in this build"
+
+    /** Accept or decline an invite. Null when it went. */
+    suspend fun collabRespond(inviteId: String, accept: Boolean): String? = "Not available in this build"
+
+    /** Head commit and every file of a project the account is a member of. */
+    suspend fun collabPull(projectId: String): UiCollabSnapshot? = null
+
+    /** Push on top of [baseCommit]. Null when it went; otherwise the sentence to show. */
+    suspend fun collabCommit(projectId: String, baseCommit: String?, message: String, files: List<UiCollabFile>): String? =
+        "Not available in this build"
+
+    /** Commit history of a project, newest first. */
+    suspend fun collabLog(projectId: String): List<UiCollabCommit> = emptyList()
+
+    /** Per-file before and after for one commit. */
+    suspend fun collabCommitDetail(commitId: String): List<UiCollabDiff> = emptyList()
+
     /** Publishers for the Verify tab, optionally filtered by name or handle. Moderators only. */
     suspend fun managedPublishers(query: String? = null): UiPublisherPage =
         UiPublisherPage(error = "Moderation is not available in this build")
