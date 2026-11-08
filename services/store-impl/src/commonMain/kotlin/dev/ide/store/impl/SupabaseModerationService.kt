@@ -500,19 +500,24 @@ class SupabaseModerationService(
 
     override fun publishRelease(
         versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
-        percent: Int, audience: String,
+        percent: Int, audience: String, mandatory: Boolean,
     ): StoreResult<Unit> {
         val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
         val text = if (notes.isNullOrBlank()) "null" else q(notes.trim())
         val body = """{"p_version_code":$versionCode,"p_version_name":${q(versionName)},"p_channel":${q(channel)},""" +
-            """"p_download_url":${q(downloadUrl)},"p_notes":$text,"p_percent":$percent,"p_audience":${q(audience)}}"""
+            """"p_download_url":${q(downloadUrl)},"p_notes":$text,"p_percent":$percent,"p_audience":${q(audience)},"p_mandatory":$mandatory}"""
         return unit(rpc("store_admin_publish_release", body, token))
     }
 
-    override fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String): StoreResult<Unit> {
+    override fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean?): StoreResult<Unit> {
         val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
-        val body = """{"p_id":${q(id)},"p_enabled":$enabled,"p_percent":$percent,"p_audience":${q(audience)}}"""
+        val body = """{"p_id":${q(id)},"p_enabled":$enabled,"p_percent":$percent,"p_audience":${q(audience)},"p_mandatory":$mandatory}"""
         return unit(rpc("store_admin_set_release", body, token))
+    }
+
+    override fun deleteRelease(id: String): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return unit(rpc("store_admin_delete_release", """{"p_id":${q(id)}}""", token))
     }
 
     // These two use the signed-in account's token when there is one, so verified-only rollouts can match it.
@@ -727,6 +732,7 @@ class SupabaseModerationService(
                 downloadUrl = JsonReader.str(value, "downloadUrl").orEmpty(),
                 notes = JsonReader.str(value, "notes"),
                 publishedAt = JsonReader.str(value, "publishedAt").orEmpty(),
+                mandatory = JsonReader.bool(value, "mandatory"),
             )
         }
 
@@ -740,6 +746,7 @@ class SupabaseModerationService(
                 channel = JsonReader.str(value, "channel").orEmpty(),
                 downloadUrl = url,
                 notes = JsonReader.str(value, "notes"),
+                mandatory = JsonReader.bool(value, "mandatory"),
             )
         }
 
