@@ -128,6 +128,18 @@ internal class ProjectBackend(
         }
     }
 
+    override suspend fun createSharedFolder(name: String): String? = withContext(Dispatchers.IO) {
+        val base = ctx.manager?.projectsRoot?.toString() ?: return@withContext null
+        val safe = name.replace(Regex("[^A-Za-z0-9._ -]"), "_").trim().ifEmpty { "shared-project" }.take(60)
+        var dir = java.io.File(base, safe)
+        var i = 2
+        while (dir.exists()) {
+            dir = java.io.File(base, "$safe-$i")
+            i++
+        }
+        if (dir.mkdirs()) dir.path else null
+    }
+
     override suspend fun openProject(rootPath: String): Boolean {
         val mgr = ctx.manager ?: return false
         return withContext(Dispatchers.IO) {
