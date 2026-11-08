@@ -712,6 +712,11 @@ class CodeAssistAppState(
 
     // ---- project intents ----
 
+    fun openSharedProject(rootPath: String) {
+        resumeSuperseded = true
+        scope.launch { if (backend.projects.openProject(rootPath)) enterEditor() else refreshProjects() }
+    }
+
     fun openProject(project: ProjectInfo) {
         resumeSuperseded = true
         scope.launch { if (backend.projects.openProject(project.rootPath)) enterEditor() }
