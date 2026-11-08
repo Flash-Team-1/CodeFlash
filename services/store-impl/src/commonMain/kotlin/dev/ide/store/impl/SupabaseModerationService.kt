@@ -13,6 +13,7 @@ import dev.ide.store.VerificationPlan
 import dev.ide.store.PendingSubmission
 import dev.ide.store.ReportedContent
 import dev.ide.store.ReviewQueue
+import dev.ide.store.CollabCandidate
 import dev.ide.store.CollabChange
 import dev.ide.store.CollabCommit
 import dev.ide.store.CollabDiff
@@ -616,6 +617,15 @@ class SupabaseModerationService(
                 JsonReader.str(d, "path")?.let { p ->
                     CollabDiff(p, JsonReader.str(d, "change").orEmpty(), JsonReader.str(d, "before"), JsonReader.str(d, "after"))
                 }
+            }
+        }
+    }
+
+    override fun collabCandidates(projectId: String): StoreResult<List<CollabCandidate>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_candidates", """{"p_project":${q(projectId)}}""", token) { v ->
+            JsonReader.arr(v).mapNotNull { c ->
+                JsonReader.str(c, "id")?.let { CollabCandidate(it, JsonReader.str(c, "handle"), JsonReader.str(c, "displayName").orEmpty()) }
             }
         }
     }
