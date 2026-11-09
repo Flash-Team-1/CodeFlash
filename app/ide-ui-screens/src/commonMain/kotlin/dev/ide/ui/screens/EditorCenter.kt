@@ -111,6 +111,11 @@ internal fun EditorCenter(
     frame: (@Composable (editorBody: @Composable () -> Unit) -> Unit)? = null,
 ) {
     val project = state.backend.project
+    // Sharing is for verified accounts only; the server checks it too.
+    var verified by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        verified = runCatching { state.backend.store.myProfile() }.getOrNull()?.verified == true
+    }
     // A language server's own edits (workspace/applyEdit outside a command): applied like a multi-file fix.
     LaunchedEffect(state.backend) {
         state.backend.editor.externalEdits.collect { edits -> state.applyWorkspaceEdits(edits) }
@@ -273,6 +278,7 @@ internal fun EditorCenter(
                     }
                 },
                 compact = compact,
+                onShare = if (verified) ({ state.onShareProject?.invoke() }) else null,
                 onZenMode = { state.setZen(true) },
             )
             // Everything under the top bar: the editor proper. A wide layout lays it out between its tool-window
