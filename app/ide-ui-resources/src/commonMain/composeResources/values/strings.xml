@@ -593,6 +593,7 @@ We never collect your code, file or project names, what you type, or anything th
     <string name="edchrome_nothing_to_run">Nothing to run</string>
     <string name="run_choose_task">Choose what to run</string>
     <string name="edchrome_no_matching_tasks">No matching tasks</string>
+    <string name="edchrome_share">Share project</string>
     <string name="edchrome_build_variant">Build variant</string>
     <string name="edchrome_no_variants">No variants</string>
     <string name="edchrome_gradle_compatibility_mode">Gradle compatibility mode</string>
