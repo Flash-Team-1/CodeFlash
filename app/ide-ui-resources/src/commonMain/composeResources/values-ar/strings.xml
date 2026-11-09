@@ -655,6 +655,7 @@
     <string name="run_choose_task">اختر ما تريد تشغيله</string>
     <string name="edchrome_no_matching_tasks">لا توجد مهام مطابقة</string>
     <string name="edchrome_build_variant">متغيّر البناء</string>
+    <string name="edchrome_share">مشاركة المشروع</string>
     <string name="edchrome_no_variants">لا توجد متغيرات</string>
     <string name="edchrome_gradle_compatibility_mode">وضع توافق Gradle</string>
     <string name="edchrome_gradle_compat">توافق Gradle</string>
