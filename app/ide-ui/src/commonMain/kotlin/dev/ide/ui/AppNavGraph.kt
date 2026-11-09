@@ -61,6 +61,7 @@ import dev.ide.ui.screens.CodeStyleScreen
 import dev.ide.ui.screens.ColorSchemeScreen
 import dev.ide.ui.screens.CreateProjectScreen
 import dev.ide.ui.screens.EditorScreen
+import dev.ide.ui.screens.CollabScreen
 import dev.ide.ui.screens.ExportProjectScreen
 import dev.ide.ui.screens.HomeScreen
 import dev.ide.ui.screens.ImportPreviewScreen
@@ -298,6 +299,18 @@ private fun AppRoute(
                     preview = preview,
                     onCancel = app::cancelImportPreview,
                     onImported = app::finishImportPreview,
+                )
+            }
+        }
+
+        Screen.Collab -> {
+            val target = app.collabTarget
+            if (target != null) {
+                CollabScreen(
+                    backend = backend,
+                    project = target,
+                    onBack = app::finishCollab,
+                    onOpenProject = { path -> app.openSharedProject(path) },
                 )
             }
         }
@@ -940,6 +953,7 @@ private fun ProjectPickerRoute(
         onCloneRepository = if (app.backend.vcs.supported()) {
             { app.openPluginScreen(VcsService.SCREEN_CLONE) }
         } else null,
+        onCollabProject = { project -> app.startCollab(project) },
         onExportProject = if (fileActions.canShare || fileActions.canExport || fileActions.canReveal) {
             app::startExport
         } else null,

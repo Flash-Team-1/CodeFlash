@@ -113,6 +113,7 @@ import dev.ide.ui.generated.resources.Res
 import dev.ide.ui.generated.resources.close
 import dev.ide.ui.generated.resources.edchrome_build_console
 import dev.ide.ui.generated.resources.edchrome_build_variant
+import dev.ide.ui.generated.resources.edchrome_share
 import dev.ide.ui.generated.resources.edchrome_command_palette
 import dev.ide.ui.generated.resources.edchrome_compose_preview
 import dev.ide.ui.generated.resources.zen_mode
@@ -236,6 +237,7 @@ fun EditorTopBar(
     onPluginAction: (String) -> Unit = {},
     compact: Boolean = false,
     /** Enters zen mode from the ⋯ menu; null leaves the item out. */
+    onShare: (() -> Unit)? = null,
     onZenMode: (() -> Unit)? = null,
 ) {
     val dim = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
@@ -324,6 +326,7 @@ fun EditorTopBar(
                     activeVariant = activeVariant,
                     variants = variants,
                     onPickVariant = onPickVariant,
+                    onShare = onShare,
                     onZenMode = onZenMode,
                 )
             } else {
@@ -362,6 +365,7 @@ fun EditorTopBar(
                         variants = variants,
                         onPickVariant = onPickVariant,
                         editOnly = true,
+                        onShare = onShare,
                         onZenMode = onZenMode,
                     )
                 }
@@ -488,6 +492,7 @@ private fun EditorOverflowMenu(
     /** The wide bar's menu: only the file's edit actions and inlay hints, since everything else is inline there
      *  or has its own place (the stripe's console toggle, the breadcrumb row's view switch). */
     editOnly: Boolean = false,
+    onShare: (() -> Unit)? = null,
     onZenMode: (() -> Unit)? = null,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -523,6 +528,9 @@ private fun EditorOverflowMenu(
             }
             if (showPreview && !editOnly) OverflowItem(CaIcons.image, stringResource(Res.string.edchrome_compose_preview)) {
                 open = false; onPreview()
+            }
+            if (onShare != null) OverflowItem(CaIcons.share, stringResource(Res.string.edchrome_share)) {
+                open = false; onShare()
             }
             if (hasActiveFile && onZenMode != null) OverflowItem(CaIcons.expand, stringResource(Res.string.zen_mode)) {
                 open = false; onZenMode()

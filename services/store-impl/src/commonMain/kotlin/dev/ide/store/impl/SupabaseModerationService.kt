@@ -13,6 +13,14 @@ import dev.ide.store.VerificationPlan
 import dev.ide.store.PendingSubmission
 import dev.ide.store.ReportedContent
 import dev.ide.store.ReviewQueue
+import dev.ide.store.CollabCandidate
+import dev.ide.store.CollabChange
+import dev.ide.store.CollabCommit
+import dev.ide.store.CollabDiff
+import dev.ide.store.CollabFile
+import dev.ide.store.CollabInvite
+import dev.ide.store.CollabProject
+import dev.ide.store.CollabSnapshot
 import dev.ide.store.StoreModerationService
 import dev.ide.store.StoreResult
 import dev.ide.store.SubmissionFile
@@ -540,6 +548,160 @@ class SupabaseModerationService(
             is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
             is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
         }
+    }
+
+    // ---- shared projects ----
+    // Every call is signed in: the server reads auth.uid() for membership and verification.
+
+    override fun collabCreate(name: String, files: List<CollabFile>): StoreResult<String> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_create_project", """{"p_name":${q(name)},"p_files":${filesJson(files)}}""", token) { v ->
+            JsonReader.str(v, "projectId")
+        }
+    }
+
+    override fun collabProjects(): StoreResult<List<CollabProject>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_my_projects", "{}", token) { v -> JsonReader.arr(v).mapNotNull { parseCollabProject(it) } }
+    }
+
+    override fun collabInvites(): StoreResult<List<CollabInvite>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_my_invites", "{}", token) { v -> JsonReader.arr(v).mapNotNull { parseCollabInvite(it) } }
+    }
+
+    override fun collabInvite(projectId: String, userId: String): StoreResult<String> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_invite", """{"p_project":${q(projectId)},"p_to":${q(userId)}}""", token) { v ->
+            JsonReader.str(v, "inviteId")
+        }
+    }
+
+    override fun collabRespond(inviteId: String, accept: Boolean): StoreResult<String> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_respond", """{"p_invite":${q(inviteId)},"p_accept":$accept}""", token) { v ->
+            JsonReader.str(v, "projectId")
+        }
+    }
+
+    override fun collabPull(projectId: String): StoreResult<CollabSnapshot> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_pull", """{"p_project":${q(projectId)}}""", token) { v ->
+            CollabSnapshot(
+                headCommit = JsonReader.str(v, "headCommit"),
+                files = JsonReader.arr(JsonReader.obj(v)?.get("files")).mapNotNull { f ->
+                    JsonReader.str(f, "path")?.let { CollabFile(it, JsonReader.str(f, "content")) }
+                },
+            )
+        }
+    }
+
+    override fun collabSaveFile(projectId: String, path: String, content: String?): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val contentJson = if (content == null) "null" else q(content)
+        val body = """{"p_project":${q(projectId)},"p_path":${q(path)},"p_content":$contentJson}"""
+        return collabCall("collab_save_file", body, token) { _ -> Unit }
+    }
+
+    override fun collabWorkingFiles(projectId: String): StoreResult<List<CollabFile>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val body = """{"p_project":${q(projectId)}}"""
+        return collabCall("collab_working_files", body, token) { v ->
+            JsonReader.arr(v).mapNotNull { f -> JsonReader.str(f, "path")?.let { CollabFile(it, JsonReader.str(f, "content")) } }
+        }
+    }
+
+    override fun collabCommit(projectId: String, baseCommit: String?, message: String, files: List<CollabFile>): StoreResult<Int> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val body = """{"p_project":${q(projectId)},"p_base":${baseCommit?.let { q(it) } ?: "null"},""" +
+            """"p_message":${q(message)},"p_files":${filesJson(files)}}"""
+        return collabCall("collab_commit", body, token) { v -> JsonReader.int(v, "changes") }
+    }
+
+    override fun collabLog(projectId: String, limit: Int): StoreResult<List<CollabCommit>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_log", """{"p_project":${q(projectId)},"p_limit":$limit}""", token) { v ->
+            JsonReader.arr(v).mapNotNull { parseCollabCommit(it) }
+        }
+    }
+
+    override fun collabCommitDetail(commitId: String): StoreResult<List<CollabDiff>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_commit_detail", """{"p_commit":${q(commitId)}}""", token) { v ->
+            JsonReader.arr(v).mapNotNull { d ->
+                JsonReader.str(d, "path")?.let { p ->
+                    CollabDiff(p, JsonReader.str(d, "change").orEmpty(), JsonReader.str(d, "before"), JsonReader.str(d, "after"))
+                }
+            }
+        }
+    }
+
+    override fun collabCandidates(projectId: String): StoreResult<List<CollabCandidate>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return collabCall("collab_candidates", """{"p_project":${q(projectId)}}""", token) { v ->
+            JsonReader.arr(v).mapNotNull { c ->
+                JsonReader.str(c, "id")?.let { CollabCandidate(it, JsonReader.str(c, "handle"), JsonReader.str(c, "displayName").orEmpty()) }
+            }
+        }
+    }
+
+    override fun realtimeUrl(): String? =
+        base.replace("https://", "wss://").replace("http://", "ws://") + "/realtime/v1/websocket?apikey=$apiKey&vsn=1.0.0"
+
+    override fun accessToken(): String? = accounts.bearer()
+
+    /** One RPC: a server error is surfaced with its sentence, and an answer that does not parse is a failure. */
+    private fun <T> collabCall(name: String, body: String, token: String, read: (Any?) -> T?): StoreResult<T> =
+        when (val r = rpc(name, body, token)) {
+            is StoreResult.Ok -> {
+                val value = read(JsonReader.parseOrNull(r.value))
+                if (value != null) StoreResult.Ok<T>(value) else StoreResult.Failed<T>("Unexpected answer from the server")
+            }
+            is StoreResult.Unavailable -> StoreResult.Unavailable<T>(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed<T>(r.message, r.status)
+        }
+
+    private fun filesJson(files: List<CollabFile>): String =
+        files.joinToString(prefix = "[", postfix = "]") { f ->
+            """{"path":${q(f.path)},"content":${f.content?.let { q(it) } ?: "null"}}"""
+        }
+
+    private fun parseCollabProject(v: Any?): CollabProject? {
+        val id = JsonReader.str(v, "id") ?: return null
+        return CollabProject(
+            id = id,
+            name = JsonReader.str(v, "name").orEmpty(),
+            headCommit = JsonReader.str(v, "headCommit"),
+            isOwner = JsonReader.bool(v, "isOwner"),
+            members = JsonReader.int(v, "members"),
+        )
+    }
+
+    private fun parseCollabInvite(v: Any?): CollabInvite? {
+        val id = JsonReader.str(v, "id") ?: return null
+        val projectId = JsonReader.str(v, "projectId") ?: return null
+        return CollabInvite(
+            id = id,
+            projectId = projectId,
+            projectName = JsonReader.str(v, "projectName").orEmpty(),
+            fromName = JsonReader.str(v, "fromName").orEmpty(),
+            fromHandle = JsonReader.str(v, "fromHandle"),
+            createdAt = JsonReader.str(v, "createdAt").orEmpty(),
+        )
+    }
+
+    private fun parseCollabCommit(v: Any?): CollabCommit? {
+        val id = JsonReader.str(v, "id") ?: return null
+        return CollabCommit(
+            id = id,
+            message = JsonReader.str(v, "message").orEmpty(),
+            createdAt = JsonReader.str(v, "createdAt").orEmpty(),
+            authorName = JsonReader.str(v, "authorName").orEmpty(),
+            authorHandle = JsonReader.str(v, "authorHandle"),
+            changes = JsonReader.arr(JsonReader.obj(v)?.get("files")).mapNotNull { f ->
+                JsonReader.str(f, "path")?.let { CollabChange(it, JsonReader.str(f, "change").orEmpty()) }
+            },
+        )
     }
 
     private fun unit(result: StoreResult<String>): StoreResult<Unit> = when (result) {

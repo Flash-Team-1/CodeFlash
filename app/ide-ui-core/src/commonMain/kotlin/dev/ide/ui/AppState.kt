@@ -1,5 +1,7 @@
 package dev.ide.ui
 
+import dev.ide.ui.collab.CollabLive
+
 import dev.ide.ui.backend.UiFeatures
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,7 +60,7 @@ import kotlin.time.Duration.Companion.milliseconds
  * Top-level screens, ordered by depth so the transition helper can infer direction: a move to a
  * higher-ordinal screen animates "forward" (deeper), a lower one "back".
  */
-enum class Screen { Projects, CreateProject, ImportProject, ExportProject, Editor, Hub, Run, ModuleConfig, SdkManager, KeystoreManager, KeystoreCreate, KeystoreImport, IconManager, AppIconStudio, Settings, CodeStyle, ColorScheme, EditorSymbols, LanguageServers, Plugins, Storage, LearnPath, LessonTrack, LessonPlayer, LearnDiscussion, LearnThread, LearnAsk, LearnSolutions, ChallengePlayer, ChallengeBoard, StoreItem, SubmitProject, PublishingGuide, PublisherProfile, You, Moderation, VerificationPayment, PluginScreen }
+enum class Screen { Projects, CreateProject, ImportProject, ExportProject, Collab, Editor, Hub, Run, ModuleConfig, SdkManager, KeystoreManager, KeystoreCreate, KeystoreImport, IconManager, AppIconStudio, Settings, CodeStyle, ColorScheme, EditorSymbols, LanguageServers, Plugins, Storage, LearnPath, LessonTrack, LessonPlayer, LearnDiscussion, LearnThread, LearnAsk, LearnSolutions, ChallengePlayer, ChallengeBoard, StoreItem, SubmitProject, PublishingGuide, PublisherProfile, You, Moderation, VerificationPayment, PluginScreen }
 
 /**
  * The home screen's bottom-navigation destinations (the landing surface shown on [Screen.Projects]): the
@@ -151,6 +153,10 @@ class OpenFile(
     val tabId: Long = nextTabId(),
 ) {
     val session = EditorSession(initial, languageFor(name), editable = !readOnly)
+    init {
+        if (!readOnly) CollabLive.opened(path, session)
+    }
+
     var modified by mutableStateOf(false)
         private set
 
@@ -669,6 +675,8 @@ class IdeUiState(
     var learnFocus by mutableStateOf(true)
     var zenMode by mutableStateOf(false)
         private set
+    /** Opens the collab screen for this project. Set by the app; null when there is none. */
+    var onShareProject: (() -> Unit)? = null
     private var beforeZen: Map<ToolWindowSide, String> = emptyMap()
 
     fun setZen(on: Boolean) {
@@ -1307,6 +1315,7 @@ class IdeUiState(
         if (idx < 0) return
         openFiles.removeAt(idx)
         activeIndex = activeIndex.coerceAtMost(openFiles.lastIndex)
+        CollabLive.closed(file.path, file.session)
         closedTabs.addLast(file.path to file.name)
         while (closedTabs.size > CLOSED_TAB_LIMIT) closedTabs.removeFirst()
         backend.editor.onFileClosed(file.path)

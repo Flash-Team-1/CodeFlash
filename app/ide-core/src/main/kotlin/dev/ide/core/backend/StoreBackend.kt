@@ -15,6 +15,10 @@ import dev.ide.store.bridge.StoreReviews
 import dev.ide.store.bridge.StoreSearchPaging
 import dev.ide.store.bridge.StoreSubmissions
 import dev.ide.store.bridge.storeIo
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import dev.ide.store.bridge.StoreUpdates
 import dev.ide.store.bridge.StoreUpdater
@@ -33,6 +37,8 @@ import dev.ide.ui.backend.UiStoreFeed
 import dev.ide.ui.backend.UiStoreSection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
+import dev.ide.core.collab.CollabLiveManager
+import dev.ide.ui.collab.CollabLive
 import kotlinx.coroutines.withContext
 
 /**
@@ -784,6 +790,102 @@ internal class StoreBackend(
     override suspend fun latestUpdate(): dev.ide.ui.backend.UiAppUpdate? =
         withContext(storeIo) { moderationState.latestUpdate(updateDeviceId()) }
 
+    override suspend fun collabProjects(): List<dev.ide.ui.backend.UiCollabProject> =
+        withContext(storeIo) { moderationState.collabProjects() }
+
+    override suspend fun collabInvites(): List<dev.ide.ui.backend.UiCollabInvite> =
+        withContext(storeIo) { moderationState.collabInvites() }
+
+    override suspend fun collabCreate(name: String, files: List<dev.ide.ui.backend.UiCollabFile>): dev.ide.ui.backend.UiCollabResult =
+        withContext(storeIo) { moderationState.collabCreate(name, files) }
+
+    override suspend fun collabInvite(projectId: String, userId: String): String? =
+        withContext(storeIo) { moderationState.collabInvite(projectId, userId) }
+
+    override suspend fun collabRespond(inviteId: String, accept: Boolean): String? =
+        withContext(storeIo) { moderationState.collabRespond(inviteId, accept) }
+
+    override suspend fun collabPull(projectId: String): dev.ide.ui.backend.UiCollabSnapshot? =
+        withContext(storeIo) { moderationState.collabPull(projectId) }
+
+    override suspend fun collabCommit(
+        projectId: String,
+        baseCommit: String?,
+        message: String,
+        files: List<dev.ide.ui.backend.UiCollabFile>,
+    ): String? = withContext(storeIo) { moderationState.collabCommit(projectId, baseCommit, message, files) }
+
+    override suspend fun collabLog(projectId: String): List<dev.ide.ui.backend.UiCollabCommit> =
+        withContext(storeIo) { moderationState.collabLog(projectId) }
+
+    private val liveManager: CollabLiveManager by lazy {
+        CollabLiveManager(
+            url = { moderationService.realtimeUrl() },
+            token = { moderationService.accessToken() },
+            saveFile = { projectId, path, text -> moderationState.collabSaveFile(projectId, path, text) == null },
+        )
+    }
+
+    init {
+        CollabLive.attach = { path, session -> liveManager.attach(path, session) }
+        CollabLive.detach = { path, session -> liveManager.detach(path, session) }
+    }
+
+    private val collabSync: CollabSync by lazy {
+        CollabSync(
+            fetch = { id -> moderationState.collabPull(id) },
+            push = { id, base, message, files -> moderationState.collabCommit(id, base, message, files) },
+            create = { name, files -> moderationState.collabCreate(name, files) },
+            working = { id -> moderationState.collabWorkingFiles(id) },
+        )
+    }
+
+    /** Shared folders on this device. The background sync keeps each of them up to date. */
+    private val sharedRoots = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        syncScope.launch {
+            while (true) {
+                delay(SHARED_SYNC_MS)
+                for (root in sharedRoots.toList()) {
+                    // Files open in the editor are skipped, so no text changes under the user's cursor.
+                    runCatching { collabSync.pull(java.io.File(root), liveManager.openPaths(root)) }
+                }
+            }
+        }
+    }
+
+    override suspend fun collabSyncStatus(rootPath: String): dev.ide.ui.backend.UiCollabStatus =
+        withContext(storeIo) {
+            collabSync.status(java.io.File(rootPath)).also { if (it.projectId != null) sharedRoots.add(java.io.File(rootPath).canonicalPath) }
+        }
+
+    override suspend fun collabShare(rootPath: String, name: String): dev.ide.ui.backend.UiCollabResult =
+        withContext(storeIo) {
+            collabSync.share(java.io.File(rootPath), name).also { if (it.error == null) sharedRoots.add(java.io.File(rootPath).canonicalPath) }
+        }
+
+    override suspend fun collabJoin(rootPath: String, projectId: String): String? =
+        withContext(storeIo) {
+            collabSync.join(java.io.File(rootPath), projectId).also { if (it == null) sharedRoots.add(java.io.File(rootPath).canonicalPath) }
+        }
+
+    override suspend fun collabSyncPull(rootPath: String): String? {
+        // A pull rewrites files under the editor. Live files would drift from the editor, so pull waits.
+        if (liveManager.isLive(rootPath)) return "Close the files you are editing live before pulling"
+        return withContext(storeIo) { collabSync.pull(java.io.File(rootPath)) }
+    }
+
+    override suspend fun collabSyncPush(rootPath: String, message: String): String? =
+        withContext(storeIo) { collabSync.push(java.io.File(rootPath), message) }
+
+    override suspend fun collabCandidates(projectId: String): List<dev.ide.ui.backend.UiCollabCandidate> =
+        withContext(storeIo) { moderationState.collabCandidates(projectId) }
+
+    override suspend fun collabCommitDetail(commitId: String): List<dev.ide.ui.backend.UiCollabDiff> =
+        withContext(storeIo) { moderationState.collabCommitDetail(commitId) }
+
     override suspend fun managedPublishers(query: String?): dev.ide.ui.backend.UiPublisherPage =
         withContext(storeIo) { moderationState.publishers(query) }
 
@@ -1099,6 +1201,9 @@ internal class StoreBackend(
     )
 
     private companion object {
+        /** How often shared folders are pulled in the background. */
+        const val SHARED_SYNC_MS = 5_000L
+
         /** How long Home's list of updates is reused. Each check is one search per installed project. */
         const val UPDATES_MEMO_MS = 10L * 60 * 1000
 

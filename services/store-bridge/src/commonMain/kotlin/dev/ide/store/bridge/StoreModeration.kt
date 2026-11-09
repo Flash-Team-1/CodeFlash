@@ -4,6 +4,7 @@ import dev.ide.store.ManagedPublisher
 import dev.ide.store.PendingSubmission
 import dev.ide.store.StoreModerationService
 import dev.ide.store.StoreResult
+import dev.ide.ui.backend.UiCollabFile
 import dev.ide.ui.backend.UiListingEdit
 import dev.ide.ui.backend.UiManagedPublisher
 import dev.ide.ui.backend.UiModerationQueue
@@ -272,6 +273,90 @@ class StoreModeration(private val moderation: StoreModerationService) {
                 dev.ide.ui.backend.UiAppUpdate(it.versionCode, it.versionName, it.channel, it.downloadUrl, it.notes, it.mandatory)
             }
             else -> null
+        }
+
+    // ---- shared projects ----
+
+    private fun <T> collabError(r: StoreResult<T>): String? = when (r) {
+        is StoreResult.Ok -> null
+        is StoreResult.Unavailable -> r.reason
+        is StoreResult.Failed -> r.message
+    }
+
+    fun collabProjects(): List<dev.ide.ui.backend.UiCollabProject> =
+        when (val r = moderation.collabProjects()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiCollabProject(it.id, it.name, it.headCommit, it.isOwner, it.members)
+            }
+            else -> emptyList()
+        }
+
+    fun collabInvites(): List<dev.ide.ui.backend.UiCollabInvite> =
+        when (val r = moderation.collabInvites()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiCollabInvite(it.id, it.projectId, it.projectName, it.fromName, it.fromHandle, it.createdAt)
+            }
+            else -> emptyList()
+        }
+
+    fun collabCreate(name: String, files: List<dev.ide.ui.backend.UiCollabFile>): dev.ide.ui.backend.UiCollabResult {
+        val r = moderation.collabCreate(name, files.map { dev.ide.store.CollabFile(it.path, it.content) })
+        return dev.ide.ui.backend.UiCollabResult(r.valueOrNull, collabError(r))
+    }
+
+    fun collabInvite(projectId: String, userId: String): String? = collabError(moderation.collabInvite(projectId, userId))
+
+    fun collabRespond(inviteId: String, accept: Boolean): String? = collabError(moderation.collabRespond(inviteId, accept))
+
+    fun collabPull(projectId: String): dev.ide.ui.backend.UiCollabSnapshot? =
+        when (val r = moderation.collabPull(projectId)) {
+            is StoreResult.Ok -> dev.ide.ui.backend.UiCollabSnapshot(
+                r.value.headCommit,
+                r.value.files.map { dev.ide.ui.backend.UiCollabFile(it.path, it.content) },
+            )
+            else -> null
+        }
+
+    /** Null when the push went; otherwise the sentence to show, such as "Pull first, then push again." */
+    fun collabCommit(
+        projectId: String,
+        baseCommit: String?,
+        message: String,
+        files: List<dev.ide.ui.backend.UiCollabFile>,
+    ): String? = collabError(moderation.collabCommit(projectId, baseCommit, message, files.map { dev.ide.store.CollabFile(it.path, it.content) }))
+
+    /** Null when the file is saved; otherwise the sentence to show. */
+    fun collabSaveFile(projectId: String, path: String, content: String?): String? =
+        collabError(moderation.collabSaveFile(projectId, path, content))
+
+    /** The latest saved text of each file, or null when the server cannot be reached. */
+    fun collabWorkingFiles(projectId: String): List<UiCollabFile>? =
+        when (val r = moderation.collabWorkingFiles(projectId)) {
+            is StoreResult.Ok -> r.value.map { UiCollabFile(it.path, it.content) }
+            else -> null
+        }
+
+    fun collabLog(projectId: String): List<dev.ide.ui.backend.UiCollabCommit> =
+        when (val r = moderation.collabLog(projectId)) {
+            is StoreResult.Ok -> r.value.map { c ->
+                dev.ide.ui.backend.UiCollabCommit(
+                    c.id, c.message, c.createdAt, c.authorName, c.authorHandle,
+                    c.changes.map { dev.ide.ui.backend.UiCollabChange(it.path, it.change) },
+                )
+            }
+            else -> emptyList()
+        }
+
+    fun collabCandidates(projectId: String): List<dev.ide.ui.backend.UiCollabCandidate> =
+        when (val r = moderation.collabCandidates(projectId)) {
+            is StoreResult.Ok -> r.value.map { dev.ide.ui.backend.UiCollabCandidate(it.id, it.handle, it.displayName) }
+            else -> emptyList()
+        }
+
+    fun collabCommitDetail(commitId: String): List<dev.ide.ui.backend.UiCollabDiff> =
+        when (val r = moderation.collabCommitDetail(commitId)) {
+            is StoreResult.Ok -> r.value.map { dev.ide.ui.backend.UiCollabDiff(it.path, it.change, it.before, it.after) }
+            else -> emptyList()
         }
 
     private fun ManagedPublisher.toPublisherUi() = UiManagedPublisher(

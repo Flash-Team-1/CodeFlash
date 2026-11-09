@@ -71,6 +71,8 @@ dependencies {
     implementation(project(":vfs-api"))
 
     implementation(libs.kotlinx.coroutines.core)
+    // The live co-editing socket (CollabRealtime) speaks Supabase Realtime over OkHttp's WebSocket.
+    implementation(libs.okhttp)
     // Editor customizations (symbol bar / macros) persist + import/export as JSON via the tree API (no
     // @Serializable / compiler plugin needed).
     implementation(libs.kotlinx.serialization.json)

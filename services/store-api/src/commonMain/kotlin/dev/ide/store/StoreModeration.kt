@@ -331,6 +331,60 @@ interface StoreModerationService {
     fun latestUpdate(device: String?): StoreResult<AppUpdate?> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
+    /** Start a shared project from these files. The first commit holds all of them. Verified accounts only. Returns the project id. */
+    fun collabCreate(name: String, files: List<CollabFile>): StoreResult<String> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Projects the signed-in account is a member of. */
+    fun collabProjects(): StoreResult<List<CollabProject>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Pending invites waiting for the signed-in account. */
+    fun collabInvites(): StoreResult<List<CollabInvite>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Invite a mutual follower who is verified. Returns the invite id. */
+    fun collabInvite(projectId: String, userId: String): StoreResult<String> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Accept or decline an invite. Returns the project id. */
+    fun collabRespond(inviteId: String, accept: Boolean): StoreResult<String> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** The head of a project and all of its files. Members only. */
+    fun collabPull(projectId: String): StoreResult<CollabSnapshot> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Saves one file of a shared project right away. A null [content] deletes it. Owner and editors only. */
+    fun collabSaveFile(projectId: String, path: String, content: String?): StoreResult<Unit> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** The latest saved text of every file in a shared project, including unsaved-to-commit edits. Members only. */
+    fun collabWorkingFiles(projectId: String): StoreResult<List<CollabFile>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Push on top of [baseCommit], which must still be the head. Returns how many files changed. */
+    fun collabCommit(projectId: String, baseCommit: String?, message: String, files: List<CollabFile>): StoreResult<Int> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Commit history, newest first. */
+    fun collabLog(projectId: String, limit: Int = 30): StoreResult<List<CollabCommit>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** The Realtime socket address for live editing, or null when the backend has none. */
+    fun realtimeUrl(): String? = null
+
+    /** The signed-in access token, or null when signed out. */
+    fun accessToken(): String? = null
+
+    /** People the signed-in account can invite to [projectId] right now. */
+    fun collabCandidates(projectId: String): StoreResult<List<CollabCandidate>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
+    /** Per-file before and after for one commit. */
+    fun collabCommitDetail(commitId: String): StoreResult<List<CollabDiff>> =
+        StoreResult.Unavailable("Collaboration is not available in this build")
+
     companion object {
         val Unsupported: StoreModerationService = object : StoreModerationService {}
     }
