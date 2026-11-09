@@ -110,7 +110,9 @@ fun CodeAssistApp(
 
     // The active project changes (create/open) bump the epoch; re-key per-project state on it.
     val state = remember(backend, app.epoch) {
-        IdeUiState(backend, composePreviewHost, initialGradleConvertPrompt = app.pendingGradleConvert)
+        IdeUiState(backend, composePreviewHost, initialGradleConvertPrompt = app.pendingGradleConvert).also {
+            it.onShareProject = { app.startCollab(backend.project) }
+        }
     }
     // Clear the one-shot after it has been baked into the (re-created) state, so navigating back to a project
     // later never re-triggers the convert prompt.
