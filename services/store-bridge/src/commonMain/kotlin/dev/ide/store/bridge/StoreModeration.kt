@@ -4,6 +4,7 @@ import dev.ide.store.ManagedPublisher
 import dev.ide.store.PendingSubmission
 import dev.ide.store.StoreModerationService
 import dev.ide.store.StoreResult
+import dev.ide.ui.backend.UiCollabFile
 import dev.ide.ui.backend.UiListingEdit
 import dev.ide.ui.backend.UiManagedPublisher
 import dev.ide.ui.backend.UiModerationQueue
