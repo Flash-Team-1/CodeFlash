@@ -674,9 +674,9 @@ class IdeUiState(
      */
     var learnFocus by mutableStateOf(true)
     var zenMode by mutableStateOf(false)
+        private set
     /** Opens the collab screen for this project. Set by the app; null when there is none. */
     var onShareProject: (() -> Unit)? = null
-        private set
     private var beforeZen: Map<ToolWindowSide, String> = emptyMap()
 
     fun setZen(on: Boolean) {
