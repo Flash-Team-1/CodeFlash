@@ -539,11 +539,11 @@ android {
         // tables. An empty URL leaves both features wired but inert (analytics falls back to the no-op
         // service; the store falls back to the bundled catalog), so a fork can build with no endpoint.
         // Analytics collection still never happens without the user's explicit consent.
-        val defaultSupabaseUrl = "https://lqlpkeummmmglikumotx.supabase.co"
+        val defaultSupabaseUrl = "https://jbfzbfwrljsmaflkelfv.supabase.co"
         val supabaseUrl = (findProperty("SUPABASE_URL") as String?) ?: System.getenv("SUPABASE_URL")
             ?: defaultSupabaseUrl
         val supabaseKey = (findProperty("SUPABASE_KEY") as String?) ?: System.getenv("SUPABASE_KEY")
-            ?: "sb_publishable_5T14bUAG6fOGz47kwYzG7A_25dj3ap4"
+            ?: "sb_publishable_4CWQfEHk2E1-w4jpHK-rnQ_WG4XwBL7"
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_KEY", "\"$supabaseKey\"")
 
@@ -567,7 +567,7 @@ android {
         // thing that compiles and runs a submission. Blank leaves the tab readable and submitting
         // disabled, which is what a fork with no judge of its own should get.
         val judgeUrl = (findProperty("JUDGE_URL") as String?) ?: System.getenv("JUDGE_URL")
-            ?: "https://codeassist-judge.vercel.app"
+            ?: "https://codeassist-judges.vercel.app"
         buildConfigField("String", "JUDGE_URL", "\"$judgeUrl\"")
         // CodeAssist Free AI's primary proxy (a Cloudflare Worker); the Supabase `ai-proxy` function is its fallback.
         // Blank uses the Supabase function alone.
