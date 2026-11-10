@@ -450,7 +450,7 @@ val bundleComposeDrawablesAsset = tasks.register<Copy>("bundleComposeDrawablesAs
 // the `admobAppId` placeholder; the native ad-unit id is a BuildConfig field AndroidAdHost reads. One native
 // ad unit serves every placement that has no unit of its own (see below). OFFICIAL RELEASES MUST SET BOTH real ids.
 /** The Cloudflare Worker that serves CodeAssist Free AI (see supabase/cloudflare/ai-proxy). */
-val DEFAULT_AI_PROXY_URL = "https://codeassist-ai-proxy.lucena-tyronscott.workers.dev"
+val DEFAULT_AI_PROXY_URL = "https://jbfzbfwrljsmaflkelfv.supabase.co/functions/v1/smooth-function"
 
 val testAdmobAppId = "ca-app-pub-3940256099942544~3347511713"
 val testAdmobNativeUnitId = "ca-app-pub-3940256099942544/2247696110"
