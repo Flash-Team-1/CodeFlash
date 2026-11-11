@@ -2911,7 +2911,7 @@
     <string name="rollout_percent_label">النسبة من الناس (0-100)</string>
     <string name="rollout_audience_all">الكل</string>
     <string name="rollout_audience_verified">الموثقين بس</string>
-    <string name="rollout_audience_admin">الأدمن بس</string>
+    <string name="rollout_audience_admin">للمطورين بس</string>
     <string name="rollout_on">شغّالة</string>
     <string name="rollout_off">موقوفة</string>
     <string name="rollout_turn_on">شغّلها</string>
