@@ -1263,7 +1263,6 @@
         <item quantity="other">‏%1$d درس مكتمل</item>
     </plurals>
     <string name="learn_module_meta">‏%1$d من %2$d درس · %3$d دقيقة</string>
-    <string name="run_program_window">نافذة البرنامج</string>
     <string name="learn_continue_meta">‏الدرس %1$d من %2$d · %3$s</string>
     <string name="learn_resume_lesson">متابعة الدرس %1$d</string>
     <string name="learn_minutes">%1$d دقيقة</string>
@@ -2912,6 +2911,7 @@
     <string name="rollout_percent_label">النسبة من الناس (0-100)</string>
     <string name="rollout_audience_all">الكل</string>
     <string name="rollout_audience_verified">الموثقين بس</string>
+    <string name="rollout_audience_admin">الأدمن بس</string>
     <string name="rollout_on">شغّالة</string>
     <string name="rollout_off">موقوفة</string>
     <string name="rollout_turn_on">شغّلها</string>
