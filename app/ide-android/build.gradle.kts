@@ -655,6 +655,7 @@ android {
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("compose-drawables-asset").get().asFile)
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("r8-dex-asset").get().asFile)
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("applog-runtime-asset").get().asFile)
+    sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("predexed-asset").get().asFile)
     sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("vm-spike-asset").get().asFile)
     sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("moshi-libs-asset").get().asFile)
     // The Kotlin-analysis parity corpus and its goldens, staged as test assets so the instrumented suite
@@ -892,9 +893,8 @@ val fetchAndroidBuildTools = tasks.register("fetchAndroidBuildTools") {
 // Run before anything AGP does, so the freshly-fetched lib*.so are on disk when the native-lib merge runs,
 // and the staged kotlin-stdlib.jar asset is present when the asset merge runs.
 tasks.named("preBuild").configure {
-    dependsOn(fetchAndroidBuildTools, stripAndroidJarAsset, generatePrebuiltIndexAsset, bundleKotlinStdlibAsset, bundleKotlincResourcesAsset, bundleComposeRuntimeAsset, bundleComposeFontsAsset, bundleComposeStringAsset, bundleAgentUiComposeStringAsset, bundleVcsUiComposeStringAsset, bundleComposeDrawablesAsset, bundleR8DexAsset, bundleAppLogRuntimeAsset, bundleVmSpikeComposeRuntimeAsset, bundleVmSpikeMaterial3Asset, bundleVmStackAsset, bundleMoshiLibsAsset, bundleAwtFixtureAsset)
+    dependsOn(fetchAndroidBuildTools, stripAndroidJarAsset, generatePrebuiltIndexAsset, bundleKotlinStdlibAsset, bundleKotlincResourcesAsset, bundleComposeRuntimeAsset, bundleComposeFontsAsset, bundleComposeStringAsset, bundleAgentUiComposeStringAsset, bundleVcsUiComposeStringAsset, bundleComposeDrawablesAsset, bundleR8DexAsset, bundleAppLogRuntimeAsset, predexKotlinStdlib, predexAppLogRuntime, bundleVmSpikeComposeRuntimeAsset, bundleVmSpikeMaterial3Asset, bundleVmStackAsset, bundleMoshiLibsAsset, bundleAwtFixtureAsset)
 }
-
 // Same Android packaging gap as the fonts above, for the i18n string resources. :ide-ui-resources'
 // values/strings.xml is compiled by the Compose resources plugin into binary `.cvr` files (unlike fonts,
 // which are copied verbatim), so we stage the *processed* output, not the source. The compiled strings are
