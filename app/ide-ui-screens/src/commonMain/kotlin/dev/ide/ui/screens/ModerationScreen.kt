@@ -1431,8 +1431,11 @@ private fun featureSummary(f: UiAdminFeature): String {
 
 @Composable
 private fun audienceLabel(audience: String): String =
-    if (audience == "verified") stringResource(Res.string.rollout_audience_verified)
-    else stringResource(Res.string.rollout_audience_all)
+    when (audience) {
+        "verified" -> stringResource(Res.string.rollout_audience_verified)
+        "admin" -> stringResource(Res.string.rollout_audience_admin)
+        else -> stringResource(Res.string.rollout_audience_all)
+    }
 
 /** Features with their rollout. Tap one to change it, or add a new one with its key. */
 @Composable
@@ -1735,7 +1738,12 @@ private fun ReleaseDialog(
                         TextButton(onClick = { percent = preset.toString() }) { Text("$preset%") }
                     }
                 }
-                TextButton(onClick = { audience = if (audience == "all") "verified" else "all" }) {
+                TextButton(
+                    onClick = {
+                        // Cycles Everyone -> Verified only -> Admins only -> Everyone.
+                        audience = when (audience) { "all" -> "verified"; "verified" -> "admin"; else -> "all" }
+                    },
+                ) {
                     Text(audienceLabel(audience))
                 }
                 if (release != null) {
