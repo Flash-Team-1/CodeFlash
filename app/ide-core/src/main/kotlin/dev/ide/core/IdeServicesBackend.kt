@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -576,6 +577,24 @@ class IdeServicesBackend(
                 }
             }
         }
+        // Tell background work (source-doc indexing, prebuilt downloads) when a build is compiling, wherever it runs:
+        // the live buildState covers the in-process and the `:build`-process runner alike. A user program that is
+        // running after its build doesn't count (the console's Running phase). See BuildActivity.
+        // `build` here is this backend's BuildBackend, whose flows follow the ACTIVE runner (the `:build` daemon's
+        // when builds run there); an engine's own BuildService never hears about a daemon build.
+        analyticsScope.launch {
+            val activityLog = dev.ide.platform.log.Log.logger("build.activity")
+            try {
+                kotlinx.coroutines.flow.combine(build.buildState, build.runConsole) { bs, console ->
+                    bs.status == dev.ide.ui.backend.RunStatus.Running && console?.phase != dev.ide.ui.backend.RunPhase.Running
+                }.distinctUntilChanged().collect {
+                    dev.ide.platform.BuildActivity.set(it)
+                    activityLog.info(if (it) "build compiling: background work waits" else "build idle: background work resumes")
+                }
+            } finally {
+                dev.ide.platform.BuildActivity.set(false)
+            }
+        }
         // Emit build_result (the performance signal) when a build/run reaches a terminal status, watched off
         // the live buildState so it captures every trigger (Run button, task picker, android run). Re-subscribes
         // per project (collectLatest on the epoch) since a project swap re-points services.buildState. track()
@@ -833,7 +852,10 @@ class IdeServicesBackend(
                         // any that fail from memory pressure without saying so) be told apart from logic bugs.
                         // `in_plugin` keeps a plugin's crash out of the IDE's own crash-free rate; the plugin's
                         // id is not sent (an unpublished plugin's id is its developer's package name).
+                        // `locale` (a language tag, e.g. "id-ID") because some crashes depend on it: Compose's
+                        // plural lookup throws for a default locale with no language.
                         dev.ide.analytics.CrashScrub.scrub(t) + ("thread" to thread.name) + MemSample.now().props() +
+                            ("locale" to runCatching { java.util.Locale.getDefault().toLanguageTag() }.getOrDefault("?")) +
                             (if (plugin != null) mapOf("in_plugin" to "1") else emptyMap()),
                     )
                 )
