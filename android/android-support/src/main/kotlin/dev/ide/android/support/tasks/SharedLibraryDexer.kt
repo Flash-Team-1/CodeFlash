@@ -164,9 +164,32 @@ class SharedLibraryDexer(
         }
         val wallMs = (System.nanoTime() - wallStart) / 1_000_000
         val par = if (wallMs > 0) sumMs.get().toDouble() / wallMs else 1.0
-        log("dexScope ${root.fileName}: wall=${wallMs}ms sum-per-lib=${sumMs.get()}ms parallelism~${"%.1f".format(par)}x avg=${sumMs.get() / todo.size.coerceAtLeast(1)}ms max-lib=${maxMs.get()}ms")
+        val summary = "dexScope ${root.fileName}: ${todo.size} lib(s) wall=${wallMs}ms sum-per-lib=${sumMs.get()}ms parallelism~${"%.1f".format(par)}x avg=${sumMs.get() / todo.size.coerceAtLeast(1)}ms max-lib=${maxMs.get()}ms"
+        log(summary)
+        perfLog.info(summary)
         DexArchives.prune(root, keep)
         return ok.get()
+    }
+
+    /**
+     * Download only: install into the shared cache whatever the [dexPack] has among [jars] that the cache lacks,
+     * and dex nothing. What a project's first build would otherwise download while the user waits, done as soon as
+     * its dependencies are known. Returns how many libraries it installed (0 when the key isn't own-content).
+     */
+    fun prefetch(jars: List<Path>, u: Universe): Int {
+        val pack = dexPack ?: return 0
+        val cache = dexCacheRoot ?: return 0
+        if (release || !cacheKeyIsOwnContentOnly(minApi, desugaredLibConfig)) return 0
+        val tagDir = cache.resolve(cacheTag(u.desugarDigest))
+        val wanted = jars.distinct().mapNotNull { jar ->
+            val hash = u.hashOf[jar] ?: return@mapNotNull null
+            if (DexArchives.bucketVerified(tagDir.resolve(hash))) return@mapNotNull null
+            val classes = DexArchives.classNamesOf(jar)
+            if (classes.isEmpty()) null else dev.ide.android.support.pack.DexPackSource.Wanted(hash, jar, classes)
+        }.distinctBy { it.hash }
+        if (wanted.isEmpty()) return 0
+        checkCanceled()
+        return pack.fetch(wanted, tagDir, log)
     }
 
     /**
@@ -209,6 +232,13 @@ class SharedLibraryDexer(
         threads: Int, offHeap: OffHeapArchiveDexer?, jarClasses: Set<String>,
     ): Boolean {
         val shared = dexCacheRoot?.resolve(cacheTag(desugarDigest))?.resolve(hash)
+        if (shared != null && DexArchives.isMergedBucket(shared) && DexArchives.bucketVerified(shared)) {
+            // A prebuilt (merged) library: point at it rather than copy its dex into this project; the merge reads
+            // it from the shared cache. One copy fewer per library on a first build (~1 s for a Compose app).
+            DexArchives.pointTo(bucket, shared)
+            log("dex cache hit (shared, merged): ${jar.fileName}")
+            return true
+        }
         if (shared != null && (DexArchives.bucketVerified(shared) || DexArchives.bucketComplete(shared, jarClasses))) {
             DexArchives.clearDir(bucket)
             val copiedDex = DexArchives.copyDir(shared, bucket)
@@ -271,6 +301,12 @@ class SharedLibraryDexer(
          *  library. Below it (or with core-library desugaring on) the output depends on the desugaring
          *  CLASSPATH too, which is why the cache key has to fold the whole library set. */
         const val DESUGAR_FREE_MIN_API = 26
+
+        /** The library content-hash cache's directory under the shared dex cache, used by builds and the prefetch. */
+        const val SHARED_HASHES = ".hashes"
+
+        /** Build timing to the app log (logcat on device), where a device benchmark reads it. */
+        private val perfLog by lazy { dev.ide.platform.log.Log.logger("build.perf") }
 
         /**
          * Version of how a library's desugaring classpath is chosen ([DexArchives.classpathFor]). It is part of
