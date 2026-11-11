@@ -2910,7 +2910,7 @@ We never collect your code, file or project names, what you type, or anything th
     <string name="rollout_percent_label">Percent of people (0-100)</string>
     <string name="rollout_audience_all">Everyone</string>
     <string name="rollout_audience_verified">Verified only</string>
-    <string name="rollout_audience_admin">Admins only</string>
+    <string name="rollout_audience_admin">Owners only</string>
     <string name="rollout_on">On</string>
     <string name="rollout_off">Off</string>
     <string name="rollout_turn_on">Turn on</string>
