@@ -1712,7 +1712,7 @@ private fun ReleaseDialog(
                     )
                     OutlinedTextField(
                         value = notes,
-                        onValueChange = { notes = it.take(1000) },
+                        onValueChange = { notes = it },
                         label = { Text(stringResource(Res.string.release_notes)) },
                         minLines = 2,
                     )
