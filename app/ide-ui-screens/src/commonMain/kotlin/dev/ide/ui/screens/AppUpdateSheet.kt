@@ -1,9 +1,10 @@
 package dev.ide.ui.screens
 
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -88,14 +89,16 @@ fun AppUpdateSheet(update: UiAppUpdate, fileActions: FileActions, onDismiss: () 
         sheetState = sheetState,
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !mandatory && !busy),
     ) {
-        // The sheet opens at full height. The text scrolls in the space above and the actions stay pinned
-        // underneath, so a long "What's new" never pushes the download button off the screen.
+        // The height is capped from the sheet's own measured max instead of fillMaxHeight(fraction): a fraction
+        // of an unbounded height made the sheet re-anchor and drift on its own. The text scrolls in the space
+        // above and the actions stay pinned underneath, so a long "What's new" never pushes the button off screen.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
         Column(
-            Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(horizontal = 24.dp),
+            Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.92f).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(
-                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 UpdateHeading(stringResource(Res.string.update_title, update.versionName))
@@ -142,6 +145,7 @@ fun AppUpdateSheet(update: UiAppUpdate, fileActions: FileActions, onDismiss: () 
                 TextButton(enabled = !busy, onClick = onDismiss) { Text(stringResource(Res.string.update_later)) }
             }
             Spacer(Modifier.height(32.dp))
+        }
         }
     }
 }
