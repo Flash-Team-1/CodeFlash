@@ -57,6 +57,7 @@ import dev.ide.ui.theme.rememberUiFont
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 import kotlin.random.Random
+import kotlin.time.Clock
 
 /** Where a put-off update is saved: the epoch-millis time it comes back. */
 private const val UPDATE_SNOOZE_PREF = "update.snoozeUntil"
