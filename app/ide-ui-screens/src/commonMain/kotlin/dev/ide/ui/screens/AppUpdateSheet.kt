@@ -2,9 +2,12 @@ package dev.ide.ui.screens
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -85,42 +88,49 @@ fun AppUpdateSheet(update: UiAppUpdate, fileActions: FileActions, onDismiss: () 
         sheetState = sheetState,
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = !mandatory && !busy),
     ) {
+        // The sheet opens at full height. The text scrolls in the space above and the actions stay pinned
+        // underneath, so a long "What's new" never pushes the download button off the screen.
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
+            Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            UpdateHeading(stringResource(Res.string.update_title, update.versionName))
-            Spacer(Modifier.height(10.dp))
-            UpdateBody(update.notes?.takeIf { it.isNotBlank() } ?: stringResource(Res.string.update_no_notes))
-            if (mandatory) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                UpdateHeading(stringResource(Res.string.update_title, update.versionName))
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    stringResource(Res.string.update_mandatory_note),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            if (busy) {
-                Spacer(Modifier.height(18.dp))
-                if (progress >= 0f) {
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(6.dp))
-                    UpdateBody(stringResource(Res.string.update_progress, (progress * 100).toInt()))
-                } else {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                UpdateBody(update.notes?.takeIf { it.isNotBlank() } ?: stringResource(Res.string.update_no_notes))
+                if (mandatory) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        stringResource(Res.string.update_mandatory_note),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center,
+                    )
                 }
+                if (busy) {
+                    Spacer(Modifier.height(18.dp))
+                    if (progress >= 0f) {
+                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(6.dp))
+                        UpdateBody(stringResource(Res.string.update_progress, (progress * 100).toInt()))
+                    } else {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                }
+                if (failed) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        stringResource(Res.string.update_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
             }
-            if (failed) {
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    stringResource(Res.string.update_failed),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            Spacer(Modifier.height(22.dp))
             PrimaryActionButton(
                 label = stringResource(if (busy) Res.string.update_downloading else Res.string.update_download),
                 glyph = CaSymbols.download,
@@ -131,6 +141,7 @@ fun AppUpdateSheet(update: UiAppUpdate, fileActions: FileActions, onDismiss: () 
                 Spacer(Modifier.height(6.dp))
                 TextButton(enabled = !busy, onClick = onDismiss) { Text(stringResource(Res.string.update_later)) }
             }
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
