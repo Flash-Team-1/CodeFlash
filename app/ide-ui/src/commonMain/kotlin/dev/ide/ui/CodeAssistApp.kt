@@ -150,9 +150,12 @@ fun CodeAssistApp(
     LaunchedEffect(availableUpdate, updateSnoozes) {
         val update = availableUpdate ?: return@LaunchedEffect
         if (!update.mandatory) {
-            val until = backend.settings.preference(UPDATE_SNOOZE_PREF)?.toLongOrNull() ?: 0L
+            // The saved wait only applies to the build that was put off. A newer build shows right away.
+            val saved = backend.settings.preference(UPDATE_SNOOZE_PREF)?.split(":")
+            val snoozedBuild = saved?.getOrNull(0)
+            val until = saved?.getOrNull(1)?.toLongOrNull() ?: 0L
             val wait = until - Clock.System.now().toEpochMilliseconds()
-            if (wait > 0) delay(wait)
+            if (snoozedBuild == update.versionCode.toString() && wait > 0) delay(wait)
         }
         updateVisible = true
     }
@@ -241,7 +244,7 @@ fun CodeAssistApp(
                     // Later (or swiping the sheet away) on a non-mandatory update: save a random time to show it again.
                     val until = Clock.System.now().toEpochMilliseconds() +
                         Random.nextLong(UPDATE_LATER_MIN_MS, UPDATE_LATER_MAX_MS)
-                    backend.settings.setPreference(UPDATE_SNOOZE_PREF, until.toString())
+                    backend.settings.setPreference(UPDATE_SNOOZE_PREF, "${update.versionCode}:$until")
                     updateVisible = false
                     updateSnoozes++
                 }
