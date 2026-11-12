@@ -1,3 +1,4 @@
+//©️ Flash Team
 // Android launcher: a Compose Android application that renders the reusable IDE UI (:ide-ui) — the same
 // commonMain composables the desktop launcher uses — over an Android [AndroidIdeBackend]. It is the
 // Android counterpart to :ide-desktop. Under AGP 9, Kotlin is built into `com.android.application` (no
