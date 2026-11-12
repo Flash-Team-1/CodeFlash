@@ -54,7 +54,15 @@ import dev.ide.ui.screens.ImportSourceDialog
 import dev.ide.ui.theme.CodeAssistTheme
 import dev.ide.ui.theme.rememberJetBrainsMono
 import dev.ide.ui.theme.rememberUiFont
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
+import kotlin.random.Random
+
+/** Where a put-off update is saved: the epoch-millis time it comes back. */
+private const val UPDATE_SNOOZE_PREF = "update.snoozeUntil"
+/** A put-off update comes back after a random wait between these two (15 minutes to 3 hours). */
+private const val UPDATE_LATER_MIN_MS = 15 * 60_000L
+private const val UPDATE_LATER_MAX_MS = 3 * 60 * 60_000L
 
 /**
  * Root of the reusable IDE UI. Hosts pick the toolkit (Compose Desktop window, Android activity) and
@@ -127,13 +135,25 @@ fun CodeAssistApp(
     LaunchedEffect(importPackagePath) { importPackagePath?.let { app.openImportPackage(it) } }
     // Feature switches from the server, then an update prompt only where the app can install one and only when it is newer.
     var availableUpdate by remember { mutableStateOf<UiAppUpdate?>(null) }
-    var updateDismissed by remember { mutableStateOf(false) }
+    // Whether the update sheet is up now. A non-mandatory update put off with "Later" (or dismissed) comes back
+    // at a random time, saved so a relaunch keeps waiting for that time instead of showing on every launch.
+    var updateVisible by remember { mutableStateOf(false) }
+    var updateSnoozes by remember { mutableStateOf(0) }
     LaunchedEffect(Unit) {
         RemoteFeatures.replace(backend.store.myFeatures())
         val latest = backend.store.latestUpdate()
         if (fileActions.canInstallApk && latest != null && latest.versionCode > fileActions.appVersionCode) {
             availableUpdate = latest
         }
+    }
+    LaunchedEffect(availableUpdate, updateSnoozes) {
+        val update = availableUpdate ?: return@LaunchedEffect
+        if (!update.mandatory) {
+            val until = backend.settings.preference(UPDATE_SNOOZE_PREF)?.toLongOrNull() ?: 0L
+            val wait = until - Clock.System.now().toEpochMilliseconds()
+            if (wait > 0) delay(wait)
+        }
+        updateVisible = true
     }
     // A store link handed in from outside the app. Cleared through the host once acted on, so tapping the
     // same link again is a fresh null -> id change and opens it again.
@@ -215,8 +235,15 @@ fun CodeAssistApp(
             // Renders nothing — it just observes the build state and asks the host to present an interstitial.
             BuildAdInterstitial(backend, app.adController)
             // The update sheet sits inside the app theme, so it takes the active colors and follows theme changes.
-            availableUpdate?.takeIf { it.mandatory || !updateDismissed }?.let { update ->
-                AppUpdateSheet(update, fileActions) { updateDismissed = true }
+            availableUpdate?.takeIf { updateVisible }?.let { update ->
+                AppUpdateSheet(update, fileActions) {
+                    // Later (or swiping the sheet away) on a non-mandatory update: save a random time to show it again.
+                    val until = Clock.System.now().toEpochMilliseconds() +
+                        Random.nextLong(UPDATE_LATER_MIN_MS, UPDATE_LATER_MAX_MS)
+                    backend.settings.setPreference(UPDATE_SNOOZE_PREF, until.toString())
+                    updateVisible = false
+                    updateSnoozes++
+                }
             }
             // Mouse or touch, from the last pointer event, for the parts of the UI that size and reveal by pointer.
             PointerInputModeHost {
