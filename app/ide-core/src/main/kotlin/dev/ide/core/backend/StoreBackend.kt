@@ -750,6 +750,19 @@ internal class StoreBackend(
     override suspend fun adminReleases(): List<dev.ide.ui.backend.UiAdminRelease> =
         withContext(storeIo) { moderationState.adminReleases() }
 
+    override suspend fun adminPlugins(): List<dev.ide.ui.backend.UiAdminPlugin> =
+        withContext(storeIo) { moderationState.adminPlugins() }
+
+    override suspend fun upsertPlugin(
+        id: String, name: String, version: String, downloadUrl: String,
+        pageUrl: String?, tagline: String?, description: String?,
+    ): String? = withContext(storeIo) {
+        moderationState.upsertPlugin(id, name, version, downloadUrl, pageUrl, tagline, description)
+    }
+
+    override suspend fun deletePlugin(id: String): String? =
+        withContext(storeIo) { moderationState.deletePlugin(id) }
+
     override suspend fun publishRelease(
         versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
         percent: Int, audience: String, mandatory: Boolean,
