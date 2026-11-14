@@ -153,6 +153,9 @@
 # Renamed classes stay in their packages: crash scrubbing (CrashScrub) tells the
 # app's own frames apart by the "dev.ide." prefix.
 -keeppackagenames dev.ide.**
+# Message-bus topics are listener interfaces reached through java.lang.reflect.Proxy, by Class object.
+# R8 renamed one in dev.ide.core and the proxy failed ("is not an interface"). Interfaces only, so the score cost stays small.
+-keep interface dev.ide.core.** { *; }
 
 # --- Hardening: reflection-sensitive libraries R8 stripped in the first pass.
 #     Each is reached by a name/reflection/service mechanism R8 can't trace, so
