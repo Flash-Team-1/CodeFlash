@@ -4,6 +4,8 @@
 
     <!-- Maven dependency resolution downloads artifacts from Maven Central (the Dependencies screen). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- "Download prebuilt libraries: Wi-Fi only" asks whether the connection is metered. Normal permission. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Package visibility (Android 11+/API 30): the android "Run" installs the user's APK and then
          launches it. getLaunchIntentForPackage / queryIntentActivities are filtered unless the target is
@@ -26,6 +28,8 @@
          install-confirmation. The user must also grant "install unknown apps" to CodeAssist (we deep-link
          to that Settings screen when it isn't granted yet). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Not UPDATE_PACKAGES_WITHOUT_USER_ACTION: Play refuses any upload declaring it ("APK uses a restricted
+         permission"; it is for app stores). Every install the IDE makes asks the user. -->
 
     <!-- The build/run daemon (:build process) promotes to a foreground service while a build or program is
          running, so the OS won't kill it if the user switches away mid-build (docs/build-process-isolation.md).

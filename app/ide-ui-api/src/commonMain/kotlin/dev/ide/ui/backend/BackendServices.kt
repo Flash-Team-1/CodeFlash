@@ -1573,6 +1573,35 @@ interface StoreService {
     /** Reject a payment with a note the buyer sees. Null on success, or the sentence to show. */
     suspend fun rejectPayment(id: String, note: String?): String? = "Not available in this build"
 
+    /** Every feature with its rollout. Moderators only. */
+    suspend fun adminFeatures(): List<UiAdminFeature> = emptyList()
+
+    /** Create or change a feature's rollout. Null on success, or the sentence to show. */
+    suspend fun setFeature(key: String, enabled: Boolean, percent: Int, audience: String, allowUserIds: List<String>): String? =
+        "Not available in this build"
+
+    /** Every published build, newest first. Moderators only. */
+    suspend fun adminReleases(): List<UiAdminRelease> = emptyList()
+
+    /** Publish a build for in-app update. Null on success, or the sentence to show. */
+    suspend fun publishRelease(
+        versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
+        percent: Int, audience: String, mandatory: Boolean,
+    ): String? = "Not available in this build"
+
+    /** Switch a build on or off, or change its rollout. Null on success, or the sentence to show. */
+    suspend fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean?): String? =
+        "Not available in this build"
+
+    /** Remove a build for good. Moderators only. */
+    suspend fun deleteRelease(id: String): String? = "Not available in this build"
+
+    /** The features on for this install or account, by key. */
+    suspend fun myFeatures(): Map<String, Boolean> = emptyMap()
+
+    /** The newest build this install is offered, or null. */
+    suspend fun latestUpdate(): UiAppUpdate? = null
+
     /** Publishers for the Verify tab, optionally filtered by name or handle. Moderators only. */
     suspend fun managedPublishers(query: String? = null): UiPublisherPage =
         UiPublisherPage(error = "Moderation is not available in this build")

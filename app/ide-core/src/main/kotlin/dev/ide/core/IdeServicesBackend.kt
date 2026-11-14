@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -576,42 +577,61 @@ class IdeServicesBackend(
                 }
             }
         }
-        // Emit build_result (the performance signal) when a build/run reaches a terminal status, watched off
-        // the live buildState so it captures every trigger (Run button, task picker, android run). Re-subscribes
-        // per project (collectLatest on the epoch) since a project swap re-points services.buildState. track()
-        // no-ops while consent is absent, so this is harmless when analytics is off.
+        // Tell background work (source-doc indexing, prebuilt downloads) when a build is compiling, wherever it runs:
+        // the live buildState covers the in-process and the `:build`-process runner alike. A user program that is
+        // running after its build doesn't count (the console's Running phase). See BuildActivity.
+        // `build` here is this backend's BuildBackend, whose flows follow the ACTIVE runner (the `:build` daemon's
+        // when builds run there); an engine's own BuildService never hears about a daemon build.
         analyticsScope.launch {
-            projectEpoch.collectLatest {
-                val svc = activeServices ?: return@collectLatest
-                var prev = dev.ide.ui.backend.RunStatus.Idle
-                svc.build.buildState.collectLatest { bs ->
-                    val terminal = bs.status == dev.ide.ui.backend.RunStatus.Succeeded || bs.status == dev.ide.ui.backend.RunStatus.Failed
-                    if (terminal && prev == dev.ide.ui.backend.RunStatus.Running) {
-                        // Attach this build's heap peak (Phase-0 build-isolation instrumentation): the signal
-                        // for whether a build/run is the dominant OOM driver vs. the project-open warm-up storm.
-                        val peak = svc.build.lastBuildPeak
-                        track(
-                            dev.ide.analytics.Events.BUILD_RESULT,
-                            mapOf(
-                                "ok" to (bs.status == dev.ide.ui.backend.RunStatus.Succeeded).toString(),
-                                "duration_ms" to bs.elapsedMs.toString(),
-                                "steps" to bs.steps.size.toString(),
-                            ) + (peak?.let {
-                                mapOf(
-                                    "peak_heap_mb" to it.usedMb.toString(),
-                                    "min_headroom_mb" to it.headroomMb.toString(),
-                                    "heap_max_mb" to it.maxMb.toString(),
-                                )
-                            } ?: emptyMap())
-                            // On failure, categorize WHY (compile vs resource vs tool vs oom vs no-diagnostic):
-                            // the ok=false bit alone can't tell a user's compile error from our pipeline throwing.
-                            + (if (bs.status == dev.ide.ui.backend.RunStatus.Failed)
-                                mapOf("failure_kind" to BuildFailureKind.classify(bs.diagnostics, bs.log))
-                              else emptyMap()),
-                        )
-                    }
-                    prev = bs.status
+            val activityLog = dev.ide.platform.log.Log.logger("build.activity")
+            try {
+                kotlinx.coroutines.flow.combine(build.buildState, build.runConsole) { bs, console ->
+                    bs.status == dev.ide.ui.backend.RunStatus.Running && console?.phase != dev.ide.ui.backend.RunPhase.Running
+                }.distinctUntilChanged().collect {
+                    dev.ide.platform.BuildActivity.set(it)
+                    activityLog.info(if (it) "build compiling: background work waits" else "build idle: background work resumes")
                 }
+            } finally {
+                dev.ide.platform.BuildActivity.set(false)
+            }
+        }
+        // Emit build_result (the performance signal) when a build/run reaches a terminal status, watched off the
+        // live buildState so it captures every trigger (Run button, task picker, android run). `build` is this
+        // backend's BuildBackend, which follows the ACTIVE runner and re-points on a project swap: an engine's own
+        // BuildService never hears about a build in the `:build` daemon (Android's default), so builds there went
+        // unreported. track() no-ops while consent is absent, so this is harmless when analytics is off.
+        analyticsScope.launch {
+            var prev = dev.ide.ui.backend.RunStatus.Idle
+            build.buildState.collect { bs ->
+                val terminal = bs.status == dev.ide.ui.backend.RunStatus.Succeeded || bs.status == dev.ide.ui.backend.RunStatus.Failed
+                if (terminal && prev == dev.ide.ui.backend.RunStatus.Running) {
+                    // Attach this build's heap peak (Phase-0 build-isolation instrumentation) when it ran in this
+                    // process: the in-process service measured it. A daemon build's peak is the daemon's, and the
+                    // in-process value would be an earlier build's.
+                    val svc = activeServices
+                    val peak = svc?.takeIf { buildRunnerFor(it) === it.buildRunner }?.build?.lastBuildPeak
+                    track(
+                        dev.ide.analytics.Events.BUILD_RESULT,
+                        mapOf(
+                            "ok" to (bs.status == dev.ide.ui.backend.RunStatus.Succeeded).toString(),
+                            "duration_ms" to bs.elapsedMs.toString(),
+                            "steps" to bs.steps.size.toString(),
+                            "process" to (if (peak != null || svc?.let { buildRunnerFor(it) === it.buildRunner } == true) "in-process" else "daemon"),
+                        ) + (peak?.let {
+                            mapOf(
+                                "peak_heap_mb" to it.usedMb.toString(),
+                                "min_headroom_mb" to it.headroomMb.toString(),
+                                "heap_max_mb" to it.maxMb.toString(),
+                            )
+                        } ?: emptyMap())
+                        // On failure, categorize WHY (compile vs resource vs tool vs oom vs no-diagnostic):
+                        // the ok=false bit alone can't tell a user's compile error from our pipeline throwing.
+                        + (if (bs.status == dev.ide.ui.backend.RunStatus.Failed)
+                            mapOf("failure_kind" to BuildFailureKind.classify(bs.diagnostics, bs.log))
+                          else emptyMap()),
+                    )
+                }
+                prev = bs.status
             }
         }
     }
@@ -833,7 +853,10 @@ class IdeServicesBackend(
                         // any that fail from memory pressure without saying so) be told apart from logic bugs.
                         // `in_plugin` keeps a plugin's crash out of the IDE's own crash-free rate; the plugin's
                         // id is not sent (an unpublished plugin's id is its developer's package name).
+                        // `locale` (a language tag, e.g. "id-ID") because some crashes depend on it: Compose's
+                        // plural lookup throws for a default locale with no language.
                         dev.ide.analytics.CrashScrub.scrub(t) + ("thread" to thread.name) + MemSample.now().props() +
+                            ("locale" to runCatching { java.util.Locale.getDefault().toLanguageTag() }.getOrDefault("?")) +
                             (if (plugin != null) mapOf("in_plugin" to "1") else emptyMap()),
                     )
                 )

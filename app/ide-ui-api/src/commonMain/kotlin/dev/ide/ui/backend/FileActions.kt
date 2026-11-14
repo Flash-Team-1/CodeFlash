@@ -110,6 +110,18 @@ interface FileActions {
      */
     fun installApk(path: String) = Unit
 
+    /** The running build's version code, so the app can tell whether an offered update is newer. */
+    val appVersionCode: Int get() = 0
+
+    /** Whether the host can fetch a file inside the app (with progress) instead of opening a link. */
+    val canDownloadFile: Boolean get() = false
+
+    /** Downloads [url] into the app's own storage. Returns the local path, or null on failure. */
+    suspend fun downloadFile(url: String, fileName: String, onProgress: (Float) -> Unit): String? = null
+
+    /** Hands a file [downloadFile] returned to the system installer. */
+    fun installDownloadedApk(path: String) = Unit
+
     companion object {
         /**
          * Whether [path] is an APK the IDE's own build wrote: one under a module's `build/outputs/apk/`.

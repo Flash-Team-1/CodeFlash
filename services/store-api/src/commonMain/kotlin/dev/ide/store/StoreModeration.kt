@@ -296,6 +296,41 @@ interface StoreModerationService {
     fun rejectPayment(id: String, note: String?): StoreResult<Unit> =
         StoreResult.Unavailable("Moderation is not available in this build")
 
+    /** Every feature with its rollout settings. Moderators only. */
+    fun adminFeatures(): StoreResult<List<AdminFeature>> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Create or change a feature's rollout. [percent] is 0..100; [audience] is "all" or "verified"; [allowUserIds] always get it. */
+    fun setFeature(key: String, enabled: Boolean, percent: Int, audience: String, allowUserIds: List<String>): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Every published build, newest first. Moderators only. */
+    fun adminReleases(limit: Int = 20): StoreResult<List<AdminRelease>> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Publish a build for in-app update. [channel] is "stable" or "beta". */
+    fun publishRelease(
+        versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
+        percent: Int, audience: String, mandatory: Boolean = false,
+    ): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Switch a build on or off, or change who gets it and how many. */
+    fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean? = null): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** Remove a build for good. Moderators only. */
+    fun deleteRelease(id: String): StoreResult<Unit> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** The features on for this caller, by key. [device] stands in for the account when nobody is signed in. */
+    fun myFeatures(device: String?): StoreResult<Map<String, Boolean>> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
+    /** The newest build this caller is offered, or null when there is none. The caller checks it is newer than the running one. */
+    fun latestUpdate(device: String?): StoreResult<AppUpdate?> =
+        StoreResult.Unavailable("Moderation is not available in this build")
+
     companion object {
         val Unsupported: StoreModerationService = object : StoreModerationService {}
     }
@@ -321,6 +356,40 @@ data class AdminPaymentRequest(
     val reference: String,
     val status: String,
     val createdAt: String,
+)
+
+/** A feature flag as an admin sees it. */
+data class AdminFeature(
+    val key: String,
+    val enabled: Boolean,
+    val percent: Int,
+    val audience: String,
+    val allowUserIds: List<String>,
+)
+
+/** A published build as an admin sees it. */
+data class AdminRelease(
+    val id: String,
+    val versionCode: Int,
+    val versionName: String,
+    val channel: String,
+    val enabled: Boolean,
+    val percent: Int,
+    val audience: String,
+    val downloadUrl: String,
+    val notes: String?,
+    val publishedAt: String,
+    val mandatory: Boolean = false,
+)
+
+/** A build the app can offer as an update. */
+data class AppUpdate(
+    val versionCode: Int,
+    val versionName: String,
+    val channel: String,
+    val downloadUrl: String,
+    val notes: String?,
+    val mandatory: Boolean = false,
 )
 
 /** A publisher's request for verification, waiting for an admin. */

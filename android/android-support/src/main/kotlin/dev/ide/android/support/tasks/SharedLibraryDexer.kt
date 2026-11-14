@@ -37,6 +37,8 @@ class SharedLibraryDexer(
     private val checkCanceled: () -> Unit = {},
     private val reportDiagnostics: (ToolResult) -> Unit = {},
     private val onFailure: (String) -> Unit = {},
+    /** Pre-dexed libraries to install into the shared cache before dexing any locally; see [DexPackSource]. */
+    private val dexPack: dev.ide.android.support.pack.DexPackSource? = null,
 ) {
     /** The library desugaring universe (content-hash-deduped, class-indexed) + the shared-cache digest keyed to
      *  it, so a bucket is only reused under an identical universe. */
@@ -96,6 +98,7 @@ class SharedLibraryDexer(
         // MISSES to dex. A bucket carrying a completeness sentinel is accepted without opening its jar at all
         // ([DexArchives.bucketVerified]) — so a warm scope no longer reads every library's zip directory and stats
         // one file per class, and no class-name set is retained for a library it isn't going to dex.
+        retireOlderDesugaring(root, u)
         val keep = HashSet<String>()
         val todo = ArrayList<Miss>()
         for (jar in jars) {
@@ -113,6 +116,7 @@ class SharedLibraryDexer(
         if (todo.isEmpty()) {
             DexArchives.prune(root, keep); return true
         }
+        fetchFromPack(todo, u)
         // Dispatch LARGEST-first (by class count): with a bounded worker pool, starting the big/straggler libraries
         // early packs the parallel schedule tighter, so a slow library isn't left running alone at the tail while
         // other cores idle (measured: one lib ~6.6s vs ~0.7s avg). Byte-identical output; only scheduling changes.
@@ -160,9 +164,65 @@ class SharedLibraryDexer(
         }
         val wallMs = (System.nanoTime() - wallStart) / 1_000_000
         val par = if (wallMs > 0) sumMs.get().toDouble() / wallMs else 1.0
-        log("dexScope ${root.fileName}: wall=${wallMs}ms sum-per-lib=${sumMs.get()}ms parallelism~${"%.1f".format(par)}x avg=${sumMs.get() / todo.size.coerceAtLeast(1)}ms max-lib=${maxMs.get()}ms")
+        val summary = "dexScope ${root.fileName}: ${todo.size} lib(s) wall=${wallMs}ms sum-per-lib=${sumMs.get()}ms parallelism~${"%.1f".format(par)}x avg=${sumMs.get() / todo.size.coerceAtLeast(1)}ms max-lib=${maxMs.get()}ms"
+        log(summary)
+        perfLog.info(summary)
         DexArchives.prune(root, keep)
         return ok.get()
+    }
+
+    /**
+     * Download only: install into the shared cache whatever the [dexPack] has among [jars] that the cache lacks,
+     * and dex nothing. What a project's first build would otherwise download while the user waits, done as soon as
+     * its dependencies are known. Returns how many libraries it installed (0 when the key isn't own-content).
+     */
+    fun prefetch(jars: List<Path>, u: Universe): Int {
+        val pack = dexPack ?: return 0
+        val cache = dexCacheRoot ?: return 0
+        if (release || !cacheKeyIsOwnContentOnly(minApi, desugaredLibConfig)) return 0
+        val tagDir = cache.resolve(cacheTag(u.desugarDigest))
+        val wanted = jars.distinct().mapNotNull { jar ->
+            val hash = u.hashOf[jar] ?: return@mapNotNull null
+            if (DexArchives.bucketVerified(tagDir.resolve(hash))) return@mapNotNull null
+            val classes = DexArchives.classNamesOf(jar)
+            if (classes.isEmpty()) null else dev.ide.android.support.pack.DexPackSource.Wanted(hash, jar, classes)
+        }.distinctBy { it.hash }
+        if (wanted.isEmpty()) return 0
+        checkCanceled()
+        return pack.fetch(wanted, tagDir, log)
+    }
+
+    /**
+     * Before dexing [todo] locally, let the [dexPack] fill the shared cache with the ones it already has, so
+     * [dexOneLibrary] finds them there. Only for an own-content cache key: below minSdk 26 (or with core-library
+     * desugaring) a bucket depends on the whole library set, which a published library can't know.
+     */
+    private fun fetchFromPack(todo: List<Miss>, u: Universe) {
+        val pack = dexPack ?: return
+        val cache = dexCacheRoot ?: return
+        if (release || !cacheKeyIsOwnContentOnly(minApi, desugaredLibConfig)) return
+        val tagDir = cache.resolve(cacheTag(u.desugarDigest))
+        val wanted = todo.filter { m ->
+            val shared = tagDir.resolve(m.hash)
+            !DexArchives.bucketVerified(shared) && !DexArchives.bucketComplete(shared, m.classes)
+        }.map { dev.ide.android.support.pack.DexPackSource.Wanted(it.hash, it.jar, it.classes) }
+        if (wanted.isEmpty()) return
+        checkCanceled()
+        pack.fetch(wanted, tagDir, log)
+    }
+
+    /**
+     * A module's buckets are named by library content alone, so nothing else tells a bucket desugared under an
+     * older [DESUGAR_CLASSPATH_RULES] from a current one. Clear the root once when its stamp is older; the
+     * shared cache is keyed on the rules already and refills it. Builds that don't desugar are left alone.
+     */
+    private fun retireOlderDesugaring(root: Path, u: Universe) {
+        if (!u.desugaringNeeded) return
+        val stamp = root.resolve(".desugar-rules")
+        val current = DESUGAR_CLASSPATH_RULES.toString()
+        if (runCatching { String(Files.readAllBytes(stamp)).trim() }.getOrNull() == current) return
+        DexArchives.clearDir(root); Files.createDirectories(root)
+        runCatching { Files.write(stamp, current.toByteArray()) }
     }
 
     /** Tier 2/3 for one library: copy from the shared cache on a COMPLETE hit, else dex it and seed the cache
@@ -172,7 +232,14 @@ class SharedLibraryDexer(
         threads: Int, offHeap: OffHeapArchiveDexer?, jarClasses: Set<String>,
     ): Boolean {
         val shared = dexCacheRoot?.resolve(cacheTag(desugarDigest))?.resolve(hash)
-        if (shared != null && DexArchives.bucketComplete(shared, jarClasses)) {
+        if (shared != null && DexArchives.isMergedBucket(shared) && DexArchives.bucketVerified(shared)) {
+            // A prebuilt (merged) library: point at it rather than copy its dex into this project; the merge reads
+            // it from the shared cache. One copy fewer per library on a first build (~1 s for a Compose app).
+            DexArchives.pointTo(bucket, shared)
+            log("dex cache hit (shared, merged): ${jar.fileName}")
+            return true
+        }
+        if (shared != null && (DexArchives.bucketVerified(shared) || DexArchives.bucketComplete(shared, jarClasses))) {
             DexArchives.clearDir(bucket)
             val copiedDex = DexArchives.copyDir(shared, bucket)
             // The copy source was just verified complete and [copyDir] either finishes or throws, so the module
@@ -235,6 +302,20 @@ class SharedLibraryDexer(
          *  CLASSPATH too, which is why the cache key has to fold the whole library set. */
         const val DESUGAR_FREE_MIN_API = 26
 
+        /** The library content-hash cache's directory under the shared dex cache, used by builds and the prefetch. */
+        const val SHARED_HASHES = ".hashes"
+
+        /** Build timing to the app log (logcat on device), where a device benchmark reads it. */
+        private val perfLog by lazy { dev.ide.platform.log.Log.logger("build.perf") }
+
+        /**
+         * Version of how a library's desugaring classpath is chosen ([DexArchives.classpathFor]). It is part of
+         * the shared-cache key and stamped on each module's archive root when desugaring applies, so dex made
+         * under an older rule is redone once instead of reused. 2: multi-release jars no longer drop each other
+         * (before, kotlin-stdlib and kotlinx-coroutines were missing when every other library was desugared).
+         */
+        const val DESUGAR_CLASSPATH_RULES = 2
+
         /**
          * Whether the shared-cache key for [minApi] and this desugaring config depends ONLY on a library's own
          * content, so any two dexings of that library land in the same bucket.
@@ -270,7 +351,7 @@ class SharedLibraryDexer(
                 if (desugaringNeeded) universeByHash.values.associateWith { DexArchives.classNamesOf(it) } else emptyMap()
             val desugarDigest = if (!desugaringNeeded) "" else {
                 val desugarExtra = if (cfgKey.isEmpty()) emptyList() else listOf("cfg:$cfgKey")
-                DexArchives.digestOf(universeByHash.keys + desugarExtra)
+                DexArchives.digestOf(universeByHash.keys + desugarExtra + "rules:$DESUGAR_CLASSPATH_RULES")
             }
             return Universe(hashOf, universeByHash, classesOf, desugarDigest, desugaringNeeded)
         }

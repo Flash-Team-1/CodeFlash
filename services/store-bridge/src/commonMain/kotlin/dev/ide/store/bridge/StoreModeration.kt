@@ -202,6 +202,78 @@ class StoreModeration(private val moderation: StoreModerationService) {
         is StoreResult.Failed -> r.message
     }
 
+    /** Every feature with its rollout. Empty when they could not be read. */
+    fun adminFeatures(): List<dev.ide.ui.backend.UiAdminFeature> =
+        when (val r = moderation.adminFeatures()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiAdminFeature(it.key, it.enabled, it.percent, it.audience, it.allowUserIds)
+            }
+            else -> emptyList()
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun setFeature(key: String, enabled: Boolean, percent: Int, audience: String, allowUserIds: List<String>): String? =
+        when (val r = moderation.setFeature(key, enabled, percent, audience, allowUserIds)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
+    /** Every published build, newest first. Empty when they could not be read. */
+    fun adminReleases(): List<dev.ide.ui.backend.UiAdminRelease> =
+        when (val r = moderation.adminReleases()) {
+            is StoreResult.Ok -> r.value.map {
+                dev.ide.ui.backend.UiAdminRelease(
+                    it.id, it.versionCode, it.versionName, it.channel, it.enabled, it.percent, it.audience,
+                    it.downloadUrl, it.notes, it.publishedAt, it.mandatory,
+                )
+            }
+            else -> emptyList()
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun publishRelease(
+        versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
+        percent: Int, audience: String, mandatory: Boolean,
+    ): String? =
+        when (val r = moderation.publishRelease(versionCode, versionName, channel, downloadUrl, notes, percent, audience, mandatory)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean?): String? =
+        when (val r = moderation.setRelease(id, enabled, percent, audience, mandatory)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
+    /** Null when it went; otherwise the sentence to show. */
+    fun deleteRelease(id: String): String? =
+        when (val r = moderation.deleteRelease(id)) {
+            is StoreResult.Ok -> null
+            is StoreResult.Unavailable -> r.reason
+            is StoreResult.Failed -> r.message
+        }
+
+    /** The features on for this caller, by key. Empty when they could not be read, so everything stays off. */
+    fun myFeatures(device: String?): Map<String, Boolean> =
+        when (val r = moderation.myFeatures(device)) {
+            is StoreResult.Ok -> r.value
+            else -> emptyMap()
+        }
+
+    /** The newest build this caller is offered, or null. */
+    fun latestUpdate(device: String?): dev.ide.ui.backend.UiAppUpdate? =
+        when (val r = moderation.latestUpdate(device)) {
+            is StoreResult.Ok -> r.value?.let {
+                dev.ide.ui.backend.UiAppUpdate(it.versionCode, it.versionName, it.channel, it.downloadUrl, it.notes, it.mandatory)
+            }
+            else -> null
+        }
+
     private fun ManagedPublisher.toPublisherUi() = UiManagedPublisher(
         userId = userId,
         handle = handle,

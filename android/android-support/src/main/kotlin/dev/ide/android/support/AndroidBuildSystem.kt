@@ -169,6 +169,8 @@ class AndroidBuildSystem(
     private val classTransforms: List<ClassTransform> = emptyList(),
     /** Global content-addressed library-dex cache (e.g. the host's shared caches dir); null = per-project only. */
     private val dexCacheRoot: Path? = null,
+    /** Pre-dexed libraries a debug build installs into [dexCacheRoot] before dexing the rest itself; null = none. */
+    private val dexPack: dev.ide.android.support.pack.DexPackSource? = null,
     /** Core-library-desugaring artifacts (desugar runtime + config jar); null = host ships none, so a module's
      *  `coreLibraryDesugaringEnabled` is a no-op. See [DesugarLib]. */
     private val desugarLib: DesugarLib? = null,
@@ -361,6 +363,14 @@ class AndroidBuildSystem(
         // classes + custom-view attrs resolve against the app-linked resource table).
         val extraPackages = (depAndroidLibs.mapNotNull { it.facets.get(AndroidFacet.KEY)?.namespace } +
             libs.aarPackages).distinct()
+        // Non-transitive R (AGP 8's default, see AndroidFacet.nonTransitiveRClass): aapt2 writes only the app's R,
+        // plus its symbol table, and each library's R is made from that library's own R.txt with the final ids.
+        val nonTransitiveR = facet.nonTransitiveRClass
+        val appRTxt = layout.rJar.resolveSibling("R.txt")
+        val librarySymbols = if (!nonTransitiveR) emptyList() else
+            depAndroidLibs.mapNotNull { lib ->
+                lib.facets.get(AndroidFacet.KEY)?.namespace?.let { it to buildDir(lib).resolve("intermediates").resolve("r").resolve("R.txt") }
+            } + libs.aarSymbols.map { it.packageName to it.rTxt }
 
         // Firebase/Play Services: a google-services.json in the module generates string resources merged
         // into the app's res (below the app's own res, so the app can still override). Located AGP-style.
@@ -578,7 +588,7 @@ class AndroidBuildSystem(
                 linkManifest,
                 androidJar,
                 facet.namespace,
-                extraPackages,
+                if (nonTransitiveR) emptyList() else extraPackages,
                 facet.minSdk,
                 facet.targetSdk,
                 versionCode,
@@ -589,10 +599,14 @@ class AndroidBuildSystem(
                 proguardRules = if (minify) layout.aaptProguardRules else null,
                 protoFormat = protoResources,
                 mergedRes = layout.mergedRes,
+                rTxt = if (nonTransitiveR) appRTxt else null,
             )
         }
         // Package the generated R.java (app + every --extra-package) as R.jar bytecode instead of compiling it.
-        tasks.task(generateRFile, listOf(aapt2Link)) { GenerateRJarTask(generateRFile, layout.genJava, layout.rJar) }
+        tasks.task(generateRFile, listOf(aapt2Link) + (if (nonTransitiveR) depAndroidLibs.map { TaskName(":${it.name}:generateR") } else emptyList())) {
+            if (nonTransitiveR) GenerateRJarTask(generateRFile, layout.genJava, layout.rJar, appRTxt, librarySymbols)
+            else GenerateRJarTask(generateRFile, layout.genJava, layout.rJar)
+        }
         if (appHasKotlin) {
             tasks.task(compileKotlin, listOf(aapt2Link) + directDepCompiles + directDepKotlin + vbDep + aidlDep + listOfNotNull(generateSources)) {
                 AndroidKotlinCompileTask(
@@ -819,7 +833,8 @@ class AndroidBuildSystem(
                     rJars = if (forkedR) emptyList() else rJars, rDexRoot = if (forkedR) null else layout.rArchives,
                     // When one-passing the external classpath, keep ext libs on the desugaring classpath here but
                     // don't archive them — DexExternalLibsTask dexes them to indexed dex directly.
-                    archiveExternalScope = !dexExtOnePass)
+                    archiveExternalScope = !dexExtOnePass,
+                    dexPack = dexPack)
             }
             // The "Dex merge batch size" setting, read once for this build (chunks a very large scope merge).
             val mergeBatch = mergeChunk()
@@ -964,7 +979,7 @@ class AndroidBuildSystem(
             return
         }
 
-        tasks.task(pkg, pkgDeps) { PackageApkTask(pkg, layout.resourcesAp, dexDirs, assetsDirs, listOf(layout.mergedNativeLibs), layout.unsignedApk, javaResJars = listOf(layout.mergedJavaRes), artProfile = artProfile, packaging = facet.packaging) }
+        tasks.task(pkg, pkgDeps) { PackageApkTask(pkg, layout.resourcesAp, dexDirs, assetsDirs, listOf(layout.mergedNativeLibs), layout.unsignedApk, javaResJars = listOf(layout.mergedJavaRes), artProfile = artProfile, packaging = facet.packaging, compressionLevel = if (release) java.util.zip.Deflater.BEST_COMPRESSION else java.util.zip.Deflater.BEST_SPEED) }
         tasks.task(sign, listOf(pkg)) { SignApkTask(sign, layout.unsignedApk, layout.signedApk, variantSigning, signer) }
         // Top-level lifecycle aggregate (AGP's `assemble<Variant>`): fronts the signed APK.
         val assemble = step("assemble")
@@ -1471,6 +1486,32 @@ class AndroidBuildSystem(
      * there is nothing to warm: not an Android module, no shared cache configured, no external libraries, or a
      * desugaring cache key the next build would miss.
      */
+    /**
+     * The external library jars a debug/release build of [app]'s [variantName] dexes (AAR `classes.jar`s
+     * included), exploding AARs into the build's own explosion root so a later build reuses them.
+     */
+    fun libraryDexJars(app: Module, variantName: String): List<Path> {
+        val variant = AndroidVariants.select(app, variantName)
+        return AndroidLibraries.resolve(app, Layout(app, variantName).explodedAar, variant?.configurations).dexJars
+    }
+
+    /**
+     * Download [app]'s prebuilt library dex for [variantName] into the shared cache ahead of a build, dexing
+     * nothing ([SharedLibraryDexer.prefetch]). A no-op without a [dexPack], without a shared cache, or below
+     * minSdk 26 (whose cache key covers the whole library set). Returns how many libraries it installed.
+     */
+    fun prefetchLibraryDex(app: Module, variantName: String, log: (String) -> Unit = {}, checkCanceled: () -> Unit = {}): Int {
+        val facet = app.facets.get(AndroidFacet.KEY) ?: return 0
+        val cache = dexCacheRoot ?: return 0
+        if (dexPack == null || !SharedLibraryDexer.cacheKeyIsOwnContentOnly(facet.minSdk, null) || facet.coreLibraryDesugaringEnabled) return 0
+        val jars = libraryDexJars(app, variantName)
+        if (jars.isEmpty()) return 0
+        // The build's own hash cache, so the build finds these jars already hashed.
+        val universe = SharedLibraryDexer.computeUniverse(jars, cache.resolve(SharedLibraryDexer.SHARED_HASHES), facet.minSdk, null)
+        return SharedLibraryDexer(dexer, sdk.androidJar, facet.minSdk, false, cache, null, log = log, checkCanceled = checkCanceled, dexPack = dexPack)
+            .prefetch(jars, universe)
+    }
+
     suspend fun warmLibraryDexCache(
         app: Module,
         variantName: String,
@@ -1487,28 +1528,26 @@ class AndroidBuildSystem(
             log("dex cache warm: skipped — minSdk ${facet.minSdk} keys the cache on the whole library set, so a build would miss these buckets")
             return -1
         }
-        val variant = AndroidVariants.select(app, variantName)
-        // The build's own explosion root, so an AAR the build already exploded is reused rather than re-exploded.
-        val libs = AndroidLibraries.resolve(app, Layout(app, variantName).explodedAar, variant?.configurations)
-        if (libs.dexJars.isEmpty()) return -1
+        val dexJars = libraryDexJars(app, variantName)
+        if (dexJars.isEmpty()) return -1
         Files.createDirectories(warmRoot)
         // Debug: the variant a first build and the layout preview both consume. A release build minifies through
         // R8 instead and shares none of these buckets, so warming it would be wasted work.
         val release = false
         val desugarJson = (if (facet.coreLibraryDesugaringEnabled) desugarLib else null)
             ?.extractConfigJson(warmRoot.resolve("desugar.json"))
-        val universe = SharedLibraryDexer.computeUniverse(libs.dexJars, warmRoot, facet.minSdk, desugarJson)
-        val missing = SharedLibraryDexer.undexedLibraries(libs.dexJars, universe, cache, facet.minSdk, release)
+        val universe = SharedLibraryDexer.computeUniverse(dexJars, warmRoot, facet.minSdk, desugarJson)
+        val missing = SharedLibraryDexer.undexedLibraries(dexJars, universe, cache, facet.minSdk, release)
         if (missing.isEmpty()) return 0
-        log("dex cache warm: ${missing.size} of ${libs.dexJars.size} library(ies) not dexed yet")
+        log("dex cache warm: ${missing.size} of ${dexJars.size} library(ies) not dexed yet")
         val libDexer = SharedLibraryDexer(
             dexer, sdk.androidJar, facet.minSdk, release, cache, desugarJson,
-            log = log, checkCanceled = checkCanceled,
+            log = log, checkCanceled = checkCanceled, dexPack = dexPack,
         )
         // One worker, one thread: a warm has no deadline and a build does, so this must never hold the fan-out a
         // build would otherwise get. It also bounds how long cancellation takes — checkCanceled lands between
         // libraries, so a wider budget leaves that many D8 calls still running after a build has started.
-        libDexer.dexScope(libs.dexJars, warmRoot.resolve("ext"), universe, SharedLibraryDexer.ScopeBudget(1, 1))
+        libDexer.dexScope(dexJars, warmRoot.resolve("ext"), universe, SharedLibraryDexer.ScopeBudget(1, 1))
         return missing.size
     }
 
@@ -1829,7 +1868,7 @@ class AndroidBuildSystem(
          * ART (where `java -jar` is impossible); the desktop test runs it too, so the on-device dex/sign
          * code path is exercised on the host.
          */
-        fun inProcess(sdk: AndroidSdk, signing: SigningConfig, bootClasspath: List<Path> = emptyList(), kotlin: IncrementalKotlinCompiler? = null, plugins: List<KotlinCompilerPlugin> = BUILTIN_KOTLIN_COMPILER_PLUGINS, generators: List<SourceGenerator> = emptyList(), classTransforms: List<ClassTransform> = emptyList(), dexCacheRoot: Path? = null, desugarLib: DesugarLib? = null, signingResolver: ((Module, String) -> SigningConfig?)? = null, shrinker: Shrinker? = null, dexer: Dexer? = null, mergeDexer: Dexer? = null, mergeChunk: () -> Int = { DexMergeTask.DEFAULT_MERGE_CHUNK }, appLogRuntime: () -> AndroidAppLogRuntime? = { null }, platformFor: (Int) -> Path? = { null }): AndroidBuildSystem =
+        fun inProcess(sdk: AndroidSdk, signing: SigningConfig, bootClasspath: List<Path> = emptyList(), kotlin: IncrementalKotlinCompiler? = null, plugins: List<KotlinCompilerPlugin> = BUILTIN_KOTLIN_COMPILER_PLUGINS, generators: List<SourceGenerator> = emptyList(), classTransforms: List<ClassTransform> = emptyList(), dexCacheRoot: Path? = null, desugarLib: DesugarLib? = null, signingResolver: ((Module, String) -> SigningConfig?)? = null, shrinker: Shrinker? = null, dexer: Dexer? = null, mergeDexer: Dexer? = null, mergeChunk: () -> Int = { DexMergeTask.DEFAULT_MERGE_CHUNK }, appLogRuntime: () -> AndroidAppLogRuntime? = { null }, platformFor: (Int) -> Path? = { null }, dexPack: dev.ide.android.support.pack.DexPackSource? = null): AndroidBuildSystem =
             AndroidBuildSystem(
                 sdk, signing, bootClasspath,
                 // The dexBuilder ARCHIVE dexer. The host can inject a forked-VM D8 (an [OffHeapArchiveDexer]) so a
@@ -1848,6 +1887,7 @@ class AndroidBuildSystem(
                 generators = generators,
                 classTransforms = classTransforms,
                 dexCacheRoot = dexCacheRoot,
+                dexPack = dexPack,
                 desugarLib = desugarLib,
                 signingResolver = signingResolver,
                 mergeChunk = mergeChunk,

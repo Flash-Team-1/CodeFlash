@@ -55,6 +55,18 @@ import java.util.concurrent.atomic.AtomicReference
  */
 object AndroidIde {
 
+    /**
+     * How [dev.ide.core.BackgroundThreads] lower themselves here: nice 5, a third of a normal thread's CPU share
+     * whenever the UI thread or the GC want it. Not [android.os.Process.THREAD_PRIORITY_BACKGROUND] (10): at 10
+     * and above Android also moves the thread into the background cpuset, little cores only, which would starve
+     * indexing even on an idle phone. Each process that runs an engine calls this before starting one.
+     */
+    fun installBackgroundPriority() {
+        dev.ide.core.BackgroundThreads.lowerCurrentThread = {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT + 5)
+        }
+    }
+
     /** Heavy (file copy + project gen + JDT init) — call off the main thread. */
     fun bootstrap(context: Context): Session {
         val startNs = System.nanoTime()
@@ -63,6 +75,7 @@ object AndroidIde {
         // background index concurrency to stop provoking the 32-bit-ART torn-reference SIGSEGV (see RuntimeInfo).
         // `android.os.Process.is64Bit()` reports THIS process, not merely device capability (API 23+; minSdk 26).
         dev.ide.platform.RuntimeInfo.set32Bit(!android.os.Process.is64Bit())
+        installBackgroundPriority()
         initBuiltApks(context)
 
         // App-specific EXTERNAL storage (Android/data/<pkg>/files/codeassist)
@@ -348,6 +361,11 @@ object AndroidIde {
         val appLogRuntimeJar = runCatching {
             copyAsset(context, "applog-runtime.jar", File(home, "applog-runtime.jar"))
         }.getOrNull()
+        // The bundled jars above (and the bundled kotlin-stdlib), already dexed at app build time, so a user's first
+        // build installs their dex instead of running D8 on them (see BundledDex). Best-effort like the jar.
+        val predexedJars = listOf("kotlin-stdlib", "applog-runtime").mapNotNull { name ->
+            runCatching { name to copyAsset(context, "predexed/$name.dex.zip", File(home, "predexed/$name.dex.zip")).toPath() }.getOrNull()
+        }.toMap()
         val appLogChannel = AppLogChannelImpl()
         // The legacy dex-based custom-view seam is gone (it D8-dexed the user's classes onto a DexClassLoader,
         // which Google Play's Device-and-Network-Abuse "DDL" scorer flags). Custom library AND project views are
@@ -403,6 +421,25 @@ object AndroidIde {
         // "Forward app logs" (Build Runtime page), default on — read lazily like the R8/dex knobs.
         val injectAppLogKey = settingsPrefix + BuiltInSettingsPages.INJECT_APP_LOG
         val appLogEnabledProvider = { managerRef.get()?.preference(injectAppLogKey)?.trim() != "false" }
+        // Prebuilt (already-dexed) library downloads for debug builds: the "Download prebuilt libraries" setting
+        // (Automatically / Wi-Fi only / Off), read per build. A hidden `dexPackUrl` pref points them at a staging
+        // repository instead (how a repository is tried on a device before publishing; "off" also disables).
+        val prebuiltKey = settingsPrefix + BuiltInSettingsPages.PREBUILT_LIBRARIES
+        val dexPackUrlKey = settingsPrefix + "dexPackUrl"
+        val connectivity = context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
+        val dexPackUrlProvider: () -> String? = provider@{
+            val manager = managerRef.get()
+            when (manager?.preference(prebuiltKey)?.trim()) {
+                BuiltInSettingsPages.PREBUILT_OFF -> return@provider null
+                BuiltInSettingsPages.PREBUILT_WIFI ->
+                    if (runCatching { connectivity?.isActiveNetworkMetered }.getOrNull() != false) return@provider null
+            }
+            when (val v = manager?.preference(dexPackUrlKey)?.trim()) {
+                null, "" -> dev.ide.android.support.pack.LibraryPack.DEFAULT_BASE_URL
+                "off" -> null
+                else -> v
+            }
+        }
         // Kotlin compilation runs in a PERSISTENT forked VM (`dev.ide.android.fork`): a compile then gets a
         // heap above the app cap and its working set stays off the editor's heap. Unlike the R8/D8 forks the VM
         // is not per invocation — kotlinc's cost is dominated by warm state (the compiler's class-loading and
@@ -471,6 +508,8 @@ object AndroidIde {
             appLogRuntimeJar = appLogRuntimeJar?.toPath(),
             appLogChannel = appLogChannel,
             appLogEnabledProvider = appLogEnabledProvider,
+            dexPackUrlProvider = dexPackUrlProvider,
+            predexedJars = predexedJars,
             customViewRuntime = previewRuntime,
             realViewRuntime = realViewRuntime,
             kotlinPluginLoader = kotlinPluginLoader,

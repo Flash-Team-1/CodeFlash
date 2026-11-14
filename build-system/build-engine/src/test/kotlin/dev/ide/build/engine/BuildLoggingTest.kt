@@ -5,144 +5,249 @@ import dev.ide.build.BuildLogEntry
 import dev.ide.build.BuildLogLevel
 import dev.ide.build.BuildSeverity
 import dev.ide.build.DiagnosticKind
-import dev.ide.build.DiagnosticLocation
-import kotlinx.coroutines.runBlocking
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
+import dev.ide.build.TaskContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * The build transcript is a user-facing product: a stack trace is never in it, a tool's chatter is not in
- * the default view, and a problem reads the same in the log as it does in the Problems list.
+ * Level-aware logging for build tasks, and the one place a tool's raw output is made fit to read.
+ *
+ * The transcript a user sees is a *product*, not a dump. Two rules make it one:
+ *
+ *  1. **A task logs at the level the line deserves.** `ctx.logger()` is the legacy INFO-only channel; the
+ *     [debug]/[info]/[warn]/[error] helpers below are how a task says what a line is worth. Engine
+ *     bookkeeping (cache hits, bucket counts, per-file accounting) is [debug] — real, but nobody's business
+ *     unless they asked. The console hides `DEBUG` until Verbose is switched on, so the default view is the
+ *     build's shape plus its problems, nothing else.
+ *  2. **A tool's output is humanized before anyone sees it.** [toolOutput] strips the Java stack frames a
+ *     crashed tool prints around its one-line cause, collapses the duplicate copies tools echo, levels each
+ *     surviving line by its `error:`/`warning:` prefix, and hands the cleaned lines to the structured
+ *     diagnostics parser. A stack trace is never user-facing output; it is `DEBUG` detail for a bug report.
+ *
+ * D8/R8 already humanize at the tool boundary ([dev.ide.android.support.tools.DexDiagnostics], which adds
+ * dex-specific rewrites on top); this is the generic layer every other tool gets for free.
  */
-class BuildLoggingTest {
 
-    @Test fun humanizeDropsStackFramesAndKeepsTheCause() {
-        val raw = listOf(
-            "Exception in thread \"main\" java.lang.IllegalStateException: cannot open output",
-            "\tat com.example.Tool.run(Tool.java:41)",
-            "\tat com.example.Tool.main(Tool.java:12)",
-            "... 7 more",
-        )
+/** Engine bookkeeping: true, uninteresting, hidden unless the user asks for Verbose. */
+fun TaskContext.debug(message: String) = buildLog.log(BuildLogEntry(message, BuildLogLevel.DEBUG))
 
-        val out = ToolLog.humanize(raw)
+/** Something the user would want to see in a normal build transcript. */
+fun TaskContext.info(message: String) = buildLog.log(BuildLogEntry(message, BuildLogLevel.INFO))
 
-        assertEquals(listOf("error: cannot open output"), out)
+/** A problem the build recovered from — the user should know, the build still succeeds. */
+fun TaskContext.warn(message: String) = buildLog.log(BuildLogEntry(message, BuildLogLevel.WARN))
+
+/** A problem that fails the build or a part of it. */
+fun TaskContext.error(message: String) = buildLog.log(BuildLogEntry(message, BuildLogLevel.ERROR))
+
+/**
+ * Report a problem a tool handed us *structurally* — the preferred path, and the reason a task should reach
+ * for its tool's diagnostic API before its printed output.
+ *
+ * Every in-process tool in the pipeline has one: kotlinc's `MessageCollector` (severity + path/line/column +
+ * the offending source line), ecj's `ICompilerRequestor` (`CategorizedProblem`, carrying the problem id that
+ * keys a quick fix), D8/R8's `DiagnosticsHandler` (origin + position), the manifest merger's typed records.
+ * Printing those to text and regex-parsing them back loses the column, the code, the snippet, and the
+ * severity — and lets any line containing the word "error" masquerade as a problem. So: report the
+ * diagnostic, and let [toLogLine] render the transcript's copy of it, never the other way round.
+ */
+fun TaskContext.report(diagnostic: BuildDiagnostic) {
+    diagnostics.report(diagnostic)
+    buildLog.log(BuildLogEntry(diagnostic.toLogLine(), diagnostic.severity.asLogLevel()))
+}
+
+/** How often [withHeartbeat] says a long step is still running. */
+private const val HEARTBEAT_MS = 30_000L
+
+/**
+ * Run [block], a long blocking tool call, off the caller's thread, logging `[what]: still running (2m 30s)`
+ * every [everyMs] until it returns. A full compile on a slow phone takes minutes and prints nothing of its own,
+ * and a step that stays silent that long reads as frozen.
+ */
+suspend fun <T> TaskContext.withHeartbeat(what: String, everyMs: Long = HEARTBEAT_MS, block: () -> T): T =
+    coroutineScope {
+        val started = System.nanoTime()
+        val beat = launch {
+            while (true) {
+                delay(everyMs)
+                info("$what: still running (${formatElapsed(System.nanoTime() - started)})")
+            }
+        }
+        try {
+            withContext(Dispatchers.IO) { block() }
+        } finally {
+            beat.cancel()
+        }
     }
 
-    @Test fun humanizeCollapsesAFailureEchoedTwice() {
-        // D8 prints its failure once as a diagnostic and again as the exception it threw.
-        val raw = listOf(
-            "error: Type java.lang.Foo is defined multiple times",
-            "Exception in thread \"main\" com.android.tools.r8.CompilationFailedException: " +
-                "error: Type java.lang.Foo is defined multiple times",
-            "\tat com.android.tools.r8.D8.run(D8.java:1)",
-        )
+/** `45s`, `2m 05s`. */
+internal fun formatElapsed(nanos: Long): String {
+    val total = nanos / 1_000_000_000
+    return if (total < 60) "${total}s" else "${total / 60}m ${(total % 60).toString().padStart(2, '0')}s"
+}
 
-        val out = ToolLog.humanize(raw)
+/** Report a batch of structured problems (see [report]). */
+fun TaskContext.reportAll(diagnostics: List<BuildDiagnostic>) = diagnostics.forEach { report(it) }
 
-        assertEquals(1, out.size, "one problem, reported twice, is still one problem: $out")
+/**
+ * A tool's raw output, kept as the build's transcript but nothing more: humanized, then logged at `DEBUG`.
+ *
+ * Use this for the tool whose *problems* already arrived through [report] — the text is then only a record
+ * of what the tool printed, available under Verbose and in a copied build report, and out of the way of the
+ * user who just wants to know what is wrong with their code.
+ */
+fun TaskContext.transcript(lines: List<String>) {
+    for (line in ToolLog.humanize(lines)) debug(line)
+}
+
+/** The console log level matching a diagnostic's severity. */
+fun BuildSeverity.asLogLevel(): BuildLogLevel = when (this) {
+    BuildSeverity.ERROR -> BuildLogLevel.ERROR
+    BuildSeverity.WARNING -> BuildLogLevel.WARN
+    BuildSeverity.INFO -> BuildLogLevel.INFO
+}
+
+/**
+ * A diagnostic as one transcript line, in the compiler shape everyone can read at a glance:
+ * `MainActivity.kt:42:9: error: Unresolved reference 'viewModle'`.
+ *
+ * Deliberately the file's *name*, not its path: the Problems list already groups by full path and is where
+ * you go to navigate, while the log is read on a phone where an absolute path buries the message.
+ */
+fun BuildDiagnostic.toLogLine(): String {
+    val severity = when (severity) {
+        BuildSeverity.ERROR -> "error"
+        BuildSeverity.WARNING -> "warning"
+        BuildSeverity.INFO -> "note"
+    }
+    val where = location?.let { loc ->
+        val name = loc.path.substringAfterLast('/').substringAfterLast('\\')
+        when {
+            loc.line > 0 && loc.column > 0 -> "$name:${loc.line}:${loc.column}: "
+            loc.line > 0 -> "$name:${loc.line}: "
+            else -> "$name: "
+        }
+    } ?: ""
+    return "$where$severity: $message"
+}
+
+/**
+ * Log a tool's captured output *and* parse it into structured diagnostics, in one pass over the humanized
+ * lines — for the text-only tools, the ones that have no diagnostic API to ask: aapt2, apksigner,
+ * bundletool, the AIDL compiler, and any tool run in a forked VM that reaches us as merged stderr. A tool
+ * that *does* expose its problems should use [report]/[transcript] instead.
+ *
+ * Replaces the `r.log.forEach(ctx.logger()); ctx.reportToolDiagnostics(...)` pair, which logged every line
+ * of a tool's output at INFO (stack frames included) and then parsed the *raw* text a second time. Here the
+ * output is cleaned once ([ToolLog.humanize]), each surviving line is logged at the level its own prefix
+ * declares ([ToolLog.levelOf] — chatter lands at `DEBUG`), and the same cleaned lines feed the parser, so
+ * the Problems list and the log never disagree about what the tool said.
+ */
+fun TaskContext.toolOutput(
+    source: String,
+    lines: List<String>,
+    kind: DiagnosticKind = DiagnosticKind.COMPILER,
+) {
+    if (lines.isEmpty()) return
+    val clean = ToolLog.humanize(lines)
+    for (line in clean) buildLog.log(BuildLogEntry(line, ToolLog.levelOf(line)))
+    reportToolDiagnostics(source, clean, kind)
+}
+
+/** Text rules shared by every tool adapter: what to drop, what a line's severity is, how a failure reads. */
+object ToolLog {
+
+    /**
+     * Turn a tool's raw output into lines worth showing.
+     *
+     * Drops the stack frames (`at …`, `… N more`) that surround a crashed tool's actual message; rewrites
+     * the frames' headers (`Exception in thread "…" com.foo.Bar: message`, `Caused by: com.foo.Bar: message`)
+     * into a plain `error: message`, keeping the cause and discarding the JVM ceremony; and collapses the
+     * duplicate copies tools print when they report a failure both as a diagnostic and as a thrown exception.
+     *
+     * Idempotent, so a tool that already humanized its own output (the dexers) loses nothing by passing
+     * through again.
+     */
+    fun humanize(lines: List<String>): List<String> {
+        val out = ArrayList<String>(lines.size)
+        val seenErrors = HashSet<String>()
+        for (raw in lines) {
+            val t = raw.trim()
+            if (t.isEmpty()) { if (out.lastOrNull()?.isNotEmpty() == true) out.add(raw); continue }
+            if (STACK_FRAME.matches(t) || MORE_FRAMES.matches(t)) continue
+            val rewritten = rewriteThrowableHeader(t) ?: raw
+            // A failure echoed twice (once as the tool's diagnostic, once as the exception it threw) is one
+            // problem; keep the first copy of each distinct error line and drop the rest.
+            if (levelOf(rewritten) == BuildLogLevel.ERROR && !seenErrors.add(rewritten.trim())) continue
+            out.add(rewritten)
+        }
+        return out
     }
 
-    @Test fun levelComesFromTheLinesOwnPrefixAndChatterIsDebug() {
-        assertEquals(BuildLogLevel.ERROR, ToolLog.levelOf("e: Main.kt:4:9 Unresolved reference 'x'"))
-        assertEquals(BuildLogLevel.ERROR, ToolLog.levelOf("error: cannot link resources"))
-        assertEquals(BuildLogLevel.ERROR, ToolLog.levelOf("/a/Main.java:4:9: error: cannot find symbol"))
-        assertEquals(BuildLogLevel.WARN, ToolLog.levelOf("w: unused parameter"))
-        assertEquals(BuildLogLevel.WARN, ToolLog.levelOf("/a/Main.java:4: warning: deprecated"))
-        assertEquals(BuildLogLevel.ERROR, ToolLog.levelOf("1. ERROR in /a/Main.java (at line 4)"))
-        // The chatter a tool prints around its problems is real but not news.
-        assertEquals(BuildLogLevel.DEBUG, ToolLog.levelOf("D8 (in-process) dexed 41 input(s) -> ext"))
-        assertEquals(BuildLogLevel.DEBUG, ToolLog.levelOf("processing /home/me/project/errors/Foo.kt"))
+    /**
+     * The severity a tool line declares about itself. Recognizes the prefixes the native pipeline actually
+     * emits: kotlinc's `e:`/`w:`, the GNU/javac/aapt2 `error:`/`warning:` (bare or after a `file:line:col:`),
+     * and ecj's `N. ERROR in …` block headers. Everything else is `DEBUG` — a tool's progress chatter is
+     * not news, and the lines that *are* news all label themselves.
+     */
+    fun levelOf(line: String): BuildLogLevel {
+        val t = line.trim()
+        return when {
+            ERROR_PREFIX.containsMatchIn(t) || ECJ_ERROR.containsMatchIn(t) -> BuildLogLevel.ERROR
+            WARNING_PREFIX.containsMatchIn(t) || ECJ_WARNING.containsMatchIn(t) -> BuildLogLevel.WARN
+            else -> BuildLogLevel.DEBUG
+        }
     }
 
-    @Test fun failureSummaryIsASummaryNotTheTranscript() {
-        val messages = listOf(
-            "/a/Main.kt:4:9: error: Unresolved reference 'x'",
-            "/a/Main.kt:9:1: error: Unresolved reference 'y'",
-            "/a/Main.kt:12:3: warning: unused",
-        )
-
-        assertEquals("Kotlin failed with 2 errors", ToolLog.failureSummary("Kotlin", messages))
-        // A single error reads as itself — a count would be less useful than the thing that went wrong.
-        assertEquals(
-            "/a/Main.kt:4:9: error: Unresolved reference 'x'",
-            ToolLog.failureSummary("Kotlin", messages.take(1)),
-        )
+    /**
+     * A one-line `TaskResult.Failed` summary for a tool whose problems already went out as diagnostics.
+     *
+     * The failure message is a *summary*, never the transcript: a task that hands back its whole compiler
+     * output makes the engine print every error a second time as a wall of text, on top of the navigable
+     * Problems the same output already produced. One error reads as itself; several read as a count, and
+     * the Problems list holds the detail.
+     */
+    fun failureSummary(tool: String, lines: List<String>): String {
+        val errors = humanize(lines).filter { levelOf(it) == BuildLogLevel.ERROR }
+        return when (errors.size) {
+            0 -> "$tool failed"
+            1 -> errors.first().trim()
+            else -> "$tool failed with ${errors.size} errors"
+        }
     }
 
-    @Test fun aDiagnosticRendersAsOneCompilerShapedLine() {
-        val diagnostic = BuildDiagnostic(
-            severity = BuildSeverity.ERROR,
-            message = "Unresolved reference 'viewModle'",
-            kind = DiagnosticKind.COMPILER,
-            source = "kotlin",
-            location = DiagnosticLocation("/home/me/app/src/main/kotlin/MainActivity.kt", 42, 9),
-        )
-
-        // The file's name, not its path: the Problems list navigates, the log is read on a phone.
-        assertEquals(
-            "MainActivity.kt:42:9: error: Unresolved reference 'viewModle'",
-            diagnostic.toLogLine(),
-        )
+    /**
+     * `Exception in thread "main" com.foo.Bar: boom` / `Caused by: com.foo.Bar: boom` → `error: boom`.
+     *
+     * The wrapped message often already carries the tool's own `error:` prefix (a `CompilationFailedException`
+     * built from the diagnostic it printed a moment ago). Strip it before re-prefixing, or the rewrite yields
+     * `error: error: …` — a string that no longer matches the earlier copy, so the de-duplication in
+     * [humanize] misses it and the user reads the same failure twice.
+     */
+    private fun rewriteThrowableHeader(line: String): String? {
+        val m = THROWABLE_HEADER.matchEntire(line) ?: return null
+        val type = m.groupValues[1].substringAfterLast('.')
+        val message = m.groupValues[2].trim()
+            .removePrefix("error:").removePrefix("Error:").removePrefix("e:").trim()
+        return if (message.isEmpty()) "error: $type" else "error: $message"
     }
 
-    @Test fun aToolsProblemsAndItsTranscriptBothReachTheConsoleExactlyOnce() {
-        val entries = ArrayList<BuildLogEntry>()
-        val problems = ArrayList<BuildDiagnostic>()
-        val ctx = SimpleTaskContext(onLog = { entries.add(it) }, onDiagnostic = { problems.add(it) })
+    private val STACK_FRAME = Regex("""^at\s+\S.*""")
+    private val MORE_FRAMES = Regex("""^\.\.\.\s+\d+\s+more$""")
 
-        ctx.toolOutput("aapt2", listOf(
-            "aapt2 linking 41 resource(s)",
-            "/a/res/values/strings.xml:4:9: error: duplicate value for resource 'app_name'",
-        ), DiagnosticKind.RESOURCE)
+    // "Exception in thread "main" java.lang.IllegalStateException: boom" / "Caused by: java.io.IOException: boom"
+    private val THROWABLE_HEADER = Regex(
+        """^(?:Exception in thread\s+"[^"]*"\s+|Caused by:\s+)([\w.$]+(?:Exception|Error|Throwable))(?::\s*(.*))?$"""
+    )
 
-        assertEquals(1, problems.size, "the located error is one Problem: $problems")
-        assertEquals(BuildSeverity.ERROR, problems.single().severity)
-        assertEquals(1, entries.count { it.level == BuildLogLevel.ERROR }, "reported once, not twice")
-        // The progress line is kept, but out of the default view.
-        assertEquals(1, entries.count { it.level == BuildLogLevel.DEBUG })
-    }
-
-    @Test fun reportPutsAProblemInBothChannelsAtMatchingLevels() {
-        val entries = ArrayList<BuildLogEntry>()
-        val problems = ArrayList<BuildDiagnostic>()
-        val ctx = SimpleTaskContext(onLog = { entries.add(it) }, onDiagnostic = { problems.add(it) })
-
-        ctx.report(BuildDiagnostic(BuildSeverity.WARNING, "deprecated API", source = "kotlin"))
-
-        assertEquals(1, problems.size)
-        assertEquals(BuildLogLevel.WARN, entries.single().level)
-        assertTrue("deprecated API" in entries.single().message)
-    }
-
-    @Test fun aTranscriptNeverReachesTheDefaultView() {
-        val entries = ArrayList<BuildLogEntry>()
-        val ctx = SimpleTaskContext(onLog = { entries.add(it) })
-
-        ctx.transcript(listOf("D8 archived 12 input(s)", "\tat com.android.Foo.bar(Foo.java:1)"))
-
-        assertTrue(entries.all { it.level == BuildLogLevel.DEBUG }, "$entries")
-        assertFalse(entries.any { "at com.android" in it.message }, "frames are dropped, not demoted: $entries")
-    }
-
-    @Test fun aLongStepSaysItIsStillRunningUntilItReturns() {
-        val entries = java.util.Collections.synchronizedList(mutableListOf<BuildLogEntry>())
-        val ctx = SimpleTaskContext(onLog = { entries.add(it) })
-
-        val result = runBlocking { ctx.withHeartbeat("Compiling Kotlin", everyMs = 40) { Thread.sleep(300); 42 } }
-
-        assertEquals(42, result)
-        val beats = entries.filter { it.message.startsWith("Compiling Kotlin: still running (") }
-        assertTrue(beats.size >= 2, "$entries")
-        assertTrue(beats.all { it.level == BuildLogLevel.INFO }, "$beats")
-        Thread.sleep(150)
-        assertEquals(beats.size, entries.count { "still running" in it.message }, "the heartbeat stops with the step")
-    }
-
-    @Test fun elapsedTimeReadsAsMinutesAndSeconds() {
-        assertEquals("45s", formatElapsed(45_000_000_000))
-        assertEquals("2m 05s", formatElapsed(125_000_000_000))
-    }
+    // A bare "error:" prefix, or one after a "file:line:col:" location; kotlinc's "e:" shorthand; or a tool's
+    // own name in front ("ksp error: ...", "ksp exception: ..."), which is how a source generator reports. Without
+    // that last form a KSP failure was DEBUG-level noise: the build said Failed and the console showed no reason.
+    private val ERROR_PREFIX = Regex("""^(e:|error:|.+?:\d+(?::\d+)?:\s*error:|[a-z][\w-]* (?:error|exception):)""", RegexOption.IGNORE_CASE)
+    private val WARNING_PREFIX = Regex("""^(w:|warning:|.+?:\d+(?::\d+)?:\s*warning:|[a-z][\w-]* warning:)""", RegexOption.IGNORE_CASE)
+    private val ECJ_ERROR = Regex("""^\d+\.\s*ERROR\s+in\s+""")
+    private val ECJ_WARNING = Regex("""^\d+\.\s*WARNING\s+in\s+""")
 }

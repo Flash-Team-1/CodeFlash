@@ -771,3 +771,37 @@ data class UiAdminPaymentRequest(
     val status: String,
     val createdAt: String,
 )
+
+/** A feature flag as an admin sees it. */
+data class UiAdminFeature(
+    val key: String,
+    val enabled: Boolean,
+    val percent: Int,
+    val audience: String,
+    val allowUserIds: List<String>,
+)
+
+/** A published build as an admin sees it. */
+data class UiAdminRelease(
+    val id: String,
+    val versionCode: Int,
+    val versionName: String,
+    val channel: String,
+    val enabled: Boolean,
+    val percent: Int,
+    val audience: String,
+    val downloadUrl: String,
+    val notes: String?,
+    val publishedAt: String,
+    val mandatory: Boolean = false,
+)
+
+/** A build the app offers as an update. */
+data class UiAppUpdate(
+    val versionCode: Int,
+    val versionName: String,
+    val channel: String,
+    val downloadUrl: String,
+    val notes: String?,
+    val mandatory: Boolean = false,
+)

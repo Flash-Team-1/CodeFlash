@@ -1,3 +1,4 @@
+//©️ Flash Team
 // Android launcher: a Compose Android application that renders the reusable IDE UI (:ide-ui) — the same
 // commonMain composables the desktop launcher uses — over an Android [AndroidIdeBackend]. It is the
 // Android counterpart to :ide-desktop. Under AGP 9, Kotlin is built into `com.android.application` (no
@@ -347,6 +348,29 @@ val r8DexTool: Configuration by configurations.creating {
 }
 dependencies { r8DexTool(libs.android.r8) { isTransitive = false } }
 
+// --- Pre-dexed bundled jars -------------------------------------------------------------------------
+// Two jars go into every user app the IDE builds without coming from Maven: the bundled kotlin-stdlib and the
+// app-log bridge. The dex repository (DexRepository) finds libraries by Maven coordinate, so these two were dexed
+// on the phone in every project's first build (~5 s on a 2 GB device). They are dexed here instead, with the
+// same pinned D8 and the repository's settings (debug, min-api 26), into `predexed/<jar>.dex.zip`; the app
+// installs them as merged dex buckets the first time a build needs them (BundledDex).
+fun predexBundledJar(taskName: String, jars: Configuration, outName: String) = tasks.register<JavaExec>(taskName) {
+    description = "D8-dex the bundled $outName jar into a predexed/$outName.dex.zip asset."
+    val outZip = layout.buildDirectory.file("predexed-asset/predexed/$outName.dex.zip")
+    classpath = r8DexTool
+    mainClass.set("com.android.tools.r8.D8")
+    inputs.files(jars).withPropertyName("jar").withNormalizer(ClasspathNormalizer::class)
+    outputs.file(outZip).withPropertyName("dexZip")
+    outputs.cacheIf("a pure function of the pinned D8 and one jar") { true }
+    doFirst {
+        val out = outZip.get().asFile
+        out.parentFile.mkdirs(); out.delete()
+        args = listOf("--debug", "--min-api", "26", "--output", out.absolutePath, jars.singleFile.absolutePath)
+    }
+}
+val predexKotlinStdlib = predexBundledJar("predexKotlinStdlib", kotlinStdlibArtifact, "kotlin-stdlib")
+val predexAppLogRuntime = predexBundledJar("predexAppLogRuntime", appLogRuntimeArtifact, "applog-runtime")
+
 val r8StaxRuntime: Configuration by configurations.creating {
     isCanBeConsumed = false
     isCanBeResolved = true
@@ -476,7 +500,7 @@ val testAdmobRewardedUnitId = "ca-app-pub-3940256099942544/5224354917"
 val realAdmobRewardedUnitId = (findProperty("ADMOB_REWARDED_UNIT_ID") as String?)
     ?: System.getenv("ADMOB_REWARDED_UNIT_ID")
     ?: "ca-app-pub-7523005242346905/8159191965"
-// Google's TEST adaptive-banner unit, used by debug/profile/minified for both banner uses below.
+// Google's TEST adaptive-banner unit, used by debug/profile for both banner uses below.
 val testAdmobBannerUnitId = "ca-app-pub-3940256099942544/9214589741"
 // The real banner units, baked in like the ids above. A blank one turns that banner off in release: AndroidAdHost
 // then shows nothing where it would go. ADMOB_BANNER_UNIT_ID is the banner a native slot
@@ -521,8 +545,8 @@ android {
         minSdk = 26
         targetSdk = 36
         // versionCode must exceed the last published release (the previous-codebase app reached ~29).
-        versionCode = 129
-        versionName = "3.42.0"
+        versionCode = 140
+        versionName = "3.46.4"
         // connectedAndroidTest harness (the on-device Kotlin-compiler discovery spike).
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -632,6 +656,7 @@ android {
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("compose-drawables-asset").get().asFile)
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("r8-dex-asset").get().asFile)
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("applog-runtime-asset").get().asFile)
+    sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("predexed-asset").get().asFile)
     sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("vm-spike-asset").get().asFile)
     sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("moshi-libs-asset").get().asFile)
     // The Kotlin-analysis parity corpus and its goldens, staged as test assets so the instrumented suite
@@ -669,10 +694,17 @@ android {
 
     buildTypes {
         getByName("release") {
-            // R8 is OFF: the app loads JDT/ecj/D8/apksig classes reflectively and dexes user code at
-            // runtime, so aggressive shrinking would strip needed classes. Revisit with keep rules if
-            // download size becomes a concern.
-            isMinifyEnabled = false
+            // R8 shrinks the shipping build. The app reaches most of its toolchain (Kotlin compiler, IntelliJ
+            // platform, JDT, D8/R8, bundletool) and the libraries user code links against by NAME, through
+            // reflection, ServiceLoader and the preview/console interpreters, so proguard-rules.pro keeps
+            // those wholesale and lets R8 tree-shake the rest. A missing keep is a RUNTIME failure inside a
+            // feature, never a build error: :ide-android-e2e drives every feature against this build
+            // (as `profile`) on a device, run it after touching the rules or adding a dependency.
+            // -Pcodeassist.r8=false builds it unminified: the baseline :ide-android-e2e's benign-linkage list
+            // is collected from, and a quick way to tell whether a runtime failure is R8's doing.
+            isMinifyEnabled = providers.gradleProperty("codeassist.r8").orNull != "false"
+            isShrinkResources = false // code is the bulk; resources are reached by name from user projects
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
             // The shipped build serves real AdMob ads (falls back to test ids if none were configured).
             manifestPlaceholders["admobAppId"] = realAdmobAppId
@@ -686,8 +718,8 @@ android {
         // A release-like, non-debuggable build that's still installable locally (signed with the debug key).
         // Use this — never `debug` — to judge runtime/typing/recomposition performance: a `debuggable` app
         // runs with ART optimizations off and the Compose runtime is disproportionately slow in that mode,
-        // so debug timings are not representative. Mirrors `release` (R8 stays off for the reflection/runtime-
-        // dexing reasons above); only the signing differs so `adb install` works without the release keystore.
+        // so debug timings are not representative. Mirrors `release`, R8 included, so it is also the build
+        // :ide-android-e2e tests; only the signing and the ad ids differ.
         create("profile") {
             initWith(getByName("release"))
             // Sign with the release/upload key when a keystore is configured (so testers get a build with
@@ -700,35 +732,6 @@ android {
             isProfileable = true
             // This build is for on-device perf testing, so keep TEST ads (initWith(release) copied the real
             // ids — undo that) — a tester must never click a live ad.
-            manifestPlaceholders["admobAppId"] = testAdmobAppId
-            buildConfigField("String", "AD_NATIVE_UNIT_ID", "\"$testAdmobNativeUnitId\"")
-            buildConfigField("String", "AD_INTERSTITIAL_UNIT_ID", "\"$testAdmobInterstitialUnitId\"")
-            buildConfigField("String", "AD_REWARDED_UNIT_ID", "\"$testAdmobRewardedUnitId\"")
-            buildConfigField("String", "AD_NATIVE_UNIT_IDS", "\"\"")
-            buildConfigField("String", "AD_BANNER_UNIT_ID", "\"$testAdmobBannerUnitId\"")
-            buildConfigField("String", "AD_BUILD_BANNER_UNIT_ID", "\"$testAdmobBannerUnitId\"")
-        }
-        // EXPERIMENTAL, non-shipping: an R8-minified build used only to measure how far the app's own
-        // dex (~61% of the APK, mostly the bundled Kotlin compiler + IntelliJ platform) can shrink. The
-        // shipping `release` build keeps R8 OFF (see above) because the toolchain is loaded reflectively;
-        // this variant explores that "revisit with keep rules" note behind conservative keep rules
-        // (proguard-rules-minified.pro keeps the reflective toolchain wholesale and tree-shakes only the
-        // safe libraries). Build with `:ide-android:assembleMinified` — R8 whole-program on this input is
-        // memory-hungry, so bump org.gradle.jvmargs (~8g) for the run. NOT runtime-validated: a minified
-        // build can boot and still break when it compiles/dexes a user project, so never ship it without
-        // exercising the full toolchain (compile -> dex -> sign -> run -> completion) on-device.
-        create("minified") {
-            initWith(getByName("release"))
-            isMinifyEnabled = true
-            isShrinkResources = false // isolate code shrinking; resources aren't the bulk
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules-minified.pro",
-            )
-            // Sign with the release/upload key when configured, else the debug key so it installs locally.
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
-            matchingFallbacks += listOf("release")
-            // Non-shipping: keep Google TEST ad ids (initWith(release) copied the real ones).
             manifestPlaceholders["admobAppId"] = testAdmobAppId
             buildConfigField("String", "AD_NATIVE_UNIT_ID", "\"$testAdmobNativeUnitId\"")
             buildConfigField("String", "AD_INTERSTITIAL_UNIT_ID", "\"$testAdmobInterstitialUnitId\"")
@@ -803,7 +806,16 @@ android {
         // (when an NDK is present) would corrupt it.
         jniLibs {
             useLegacyPackaging = true
-            keepDebugSymbols += setOf("**/libaapt2.so")
+            // libsandboxexec.so (tools/sandbox-exec) is a static program too: the plugin sandbox's program launcher.
+            keepDebugSymbols += setOf("**/libaapt2.so", "**/libsandboxexec.so")
+        }
+        // Store dex UNCOMPRESSED (and page-aligned) so ART maps it straight from the APK: file-backed pages that
+        // every app process (the IDE, :preview, :build, :sandbox) shares and the kernel can reclaim. Deflated —
+        // AGP's default at minSdk < 28 — ART inflates the ~188 MB of dex into private memory in EACH process
+        // (measured: IDE 346 -> 203 MB PSS, :preview 227 -> 60 MB). Play already ships Android 10+ split APKs
+        // this way; this covers the GitHub release APK and Android 8-9. Costs APK size, not download size on Play.
+        dex {
+            useLegacyPackaging = false
         }
     }
 
@@ -882,9 +894,8 @@ val fetchAndroidBuildTools = tasks.register("fetchAndroidBuildTools") {
 // Run before anything AGP does, so the freshly-fetched lib*.so are on disk when the native-lib merge runs,
 // and the staged kotlin-stdlib.jar asset is present when the asset merge runs.
 tasks.named("preBuild").configure {
-    dependsOn(fetchAndroidBuildTools, stripAndroidJarAsset, generatePrebuiltIndexAsset, bundleKotlinStdlibAsset, bundleKotlincResourcesAsset, bundleComposeRuntimeAsset, bundleComposeFontsAsset, bundleComposeStringAsset, bundleAgentUiComposeStringAsset, bundleVcsUiComposeStringAsset, bundleComposeDrawablesAsset, bundleR8DexAsset, bundleAppLogRuntimeAsset, bundleVmSpikeComposeRuntimeAsset, bundleVmSpikeMaterial3Asset, bundleVmStackAsset, bundleMoshiLibsAsset, bundleAwtFixtureAsset)
+    dependsOn(fetchAndroidBuildTools, stripAndroidJarAsset, generatePrebuiltIndexAsset, bundleKotlinStdlibAsset, bundleKotlincResourcesAsset, bundleComposeRuntimeAsset, bundleComposeFontsAsset, bundleComposeStringAsset, bundleAgentUiComposeStringAsset, bundleVcsUiComposeStringAsset, bundleComposeDrawablesAsset, bundleR8DexAsset, bundleAppLogRuntimeAsset, predexKotlinStdlib, predexAppLogRuntime, bundleVmSpikeComposeRuntimeAsset, bundleVmSpikeMaterial3Asset, bundleVmStackAsset, bundleMoshiLibsAsset, bundleAwtFixtureAsset)
 }
-
 // Same Android packaging gap as the fonts above, for the i18n string resources. :ide-ui-resources'
 // values/strings.xml is compiled by the Compose resources plugin into binary `.cvr` files (unlike fonts,
 // which are copied verbatim), so we stage the *processed* output, not the source. The compiled strings are
@@ -896,6 +907,8 @@ val bundleComposeStringAsset = tasks.register<Copy>("bundleComposeStringAsset") 
     dependsOn(":ide-ui-resources:desktopProcessResources")
     from(project(":ide-ui-resources").layout.buildDirectory.dir("processedResources/desktop/main/composeResources/dev.ide.ui.generated.resources")) {
         include("values*/**/*.cvr")
+        // The backend-text translation tables (Learn, templates, settings), read with Res.readBytes.
+        include("files/**")
     }
     into(layout.buildDirectory.dir("compose-strings-asset/composeResources/dev.ide.ui.generated.resources"))
 }
@@ -943,7 +956,7 @@ val composeStringPackages: Map<String, String> = rootProject.subprojects
     }
     .toMap()
 
-tasks.matching { it.name.matches(Regex("merge(Debug|Profile|Release|Minified)Assets")) }.configureEach {
+tasks.matching { it.name.matches(Regex("merge(Debug|Profile|Release)Assets")) }.configureEach {
     val expected = composeStringPackages
     doLast {
         val merged = outputs.files.files.firstOrNull() ?: return@doLast

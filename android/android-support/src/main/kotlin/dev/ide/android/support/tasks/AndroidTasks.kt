@@ -603,6 +603,9 @@ internal class Aapt2LinkTask(
     private val protoFormat: Boolean = false,
     /** The merged res dir [compiledDir] was compiled from, so an error in it names the user's file instead. */
     private val mergedRes: Path? = null,
+    /** When set, aapt2 also writes the app's symbol table (`R.txt`, final ids) here: the source of non-transitive
+     *  library R classes (see [GenerateRJarTask]). */
+    private val rTxt: Path? = null,
 ) : Task {
     private fun archives(): List<Path> =
         if (Files.isDirectory(compiledDir)) Files.list(compiledDir).use { s ->
@@ -629,6 +632,7 @@ internal class Aapt2LinkTask(
             filePath("ap", resourcesAp)
             dirPath("R", genJavaDir)
             proguardRules?.let { filePath("proguard", it) }
+            rTxt?.let { filePath("rTxt", it) }
         }
 
     override suspend fun execute(ctx: TaskContext): TaskResult {
@@ -647,6 +651,7 @@ internal class Aapt2LinkTask(
             versionName,
             proguardRules = proguardRules,
             protoFormat = protoFormat,
+            rTxt = rTxt,
         )
         ctx.reportTool("aapt2", ResourceMergeMap.remapped(r, listOfNotNull(mergedRes)), DiagnosticKind.RESOURCE)
         return if (r.success) TaskResult.Success else TaskResult.Failed("aapt2 link failed")
@@ -747,6 +752,10 @@ internal class GenerateRJarTask(
     override val name: TaskName,
     private val genJavaDir: Path,
     private val outJar: Path,
+    /** Non-transitive library R: the app's `R.txt` (final ids) and each dependency library's package + `R.txt`.
+     *  Null keeps aapt2's own R classes, every `--extra-packages` one included. */
+    private val appRTxt: Path? = null,
+    private val librarySymbols: List<Pair<String, Path>> = emptyList(),
 ) : Task {
     private fun rSources(): List<Path> =
         if (!Files.isDirectory(genJavaDir)) emptyList()
@@ -754,12 +763,22 @@ internal class GenerateRJarTask(
             s.filter { Files.isRegularFile(it) && it.fileName.toString() == "R.java" }.collect(Collectors.toList())
         }
 
-    override val inputs: TaskInputs get() = TaskInputsImpl().apply { filePaths("rSources", rSources()) }
+    override val inputs: TaskInputs get() = TaskInputsImpl().apply {
+        filePaths("rSources", rSources())
+        appRTxt?.let { filePaths("appRTxt", listOf(it)) }
+        property("libraries", librarySymbols.joinToString(":") { it.first })
+        filePaths("libraryRTxt", librarySymbols.map { it.second }.filter { Files.exists(it) })
+    }
     override val outputs: TaskOutputs get() = TaskOutputsImpl().apply { filePath("rJar", outJar) }
 
     override suspend fun execute(ctx: TaskContext): TaskResult {
         ctx.checkCanceled()
-        val res = withContext(Dispatchers.IO) { runCatching { RBytecodeGenerator.writeJar(rSources(), outJar) } }
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
+                if (appRTxt != null) RBytecodeGenerator.writeAppJar(rSources(), appRTxt, librarySymbols, outJar)
+                else RBytecodeGenerator.writeJar(rSources(), outJar)
+            }
+        }
         return res.fold(
             onSuccess = { TaskResult.Success },
             onFailure = { TaskResult.Failed("R.jar generation failed: ${it.message}") },
@@ -984,6 +1003,8 @@ internal class DexArchiveBuilderTask(
     // classpath in one forked big-heap pass instead (the fast fresh path for desugaring builds). True keeps the
     // per-library archive + [DexMergeTask] merge (cross-project per-lib reuse; used when no desugaring applies).
     private val archiveExternalScope: Boolean = true,
+    // Pre-dexed libraries installed into the shared cache before any library is dexed here (see DexPackSource).
+    private val dexPack: dev.ide.android.support.pack.DexPackSource? = null,
 ) : Task {
     /** The first recognized dex error of a run, so the task's failure summary names the actual cause (e.g. a
      *  duplicate class) instead of a generic "dexBuilder failed". Set from the humanized dexer output. */
@@ -1029,8 +1050,12 @@ internal class DexArchiveBuilderTask(
             checkCanceled = { ctx.checkCanceled() },
             reportDiagnostics = { ctx.reportTool("d8", it, DiagnosticKind.DEX) },
             onFailure = { firstFailure.compareAndSet(null, it) },
+            dexPack = dexPack,
         )
-        val hashCacheDir = subDexRoot.parent ?: subDexRoot
+        // One library-hash cache for every project and for the prefetch, beside the shared dex cache: a new project's
+        // first build otherwise re-hashed every library jar the prefetch had just hashed (~0.7 s on a 2 GB device).
+        val hashCacheDir = dexCacheRoot?.resolve(SharedLibraryDexer.SHARED_HASHES) ?: subDexRoot.parent ?: subDexRoot
+        val tUniverse = System.nanoTime()
         // External scope: universe = external libs alone. R.jar rides along as an [extraDexJars] entry so it gets a
         // content-hash bucket (dexable) WITHOUT entering the desugaring universe or its cache digest.
         val extUniverse = libDexer.computeUniverse(externalJars, hashCacheDir, extraDexJars = rJars)
@@ -1039,6 +1064,8 @@ internal class DexArchiveBuilderTask(
         val subUniverse =
             if (subProjectJars.isEmpty()) extUniverse
             else libDexer.computeUniverse(subProjectJars + externalJars, hashCacheDir)
+        dev.ide.platform.log.Log.logger("build.perf").info(
+            "dexBuilder: library set hashed in ${(System.nanoTime() - tUniverse) / 1_000_000}ms (${externalJars.size} external, ${subProjectJars.size} module jar(s))")
 
         // The scopes are independent — distinct archive roots, distinct inputs, and the one piece of shared mutable
         // state (the `.hashcache` sidecar, which is not thread-safe) has already been written by the universe
@@ -1134,9 +1161,12 @@ internal class DexArchiveBuilderTask(
         }
         // relpath -> content hash, suffixed with the desugaring-config key so enabling/disabling it re-dexes
         // every class (its dex depends on the config). Empty suffix when disabled = identical to before.
+        // When desugaring applies, the classpath rules ([SharedLibraryDexer.DESUGAR_CLASSPATH_RULES]) ride along
+        // too, so classes desugared against an older, incomplete classpath re-dex once.
         val cfg = desugarConfigKey()
+        val rules = if (universe.desugaringNeeded) ":r${SharedLibraryDexer.DESUGAR_CLASSPATH_RULES}" else ""
         val current =
-            byRel.mapValues { (_, f) -> DexArchives.fileHash(f) + if (cfg.isEmpty()) "" else ":$cfg" }
+            byRel.mapValues { (_, f) -> DexArchives.fileHash(f) + (if (cfg.isEmpty()) "" else ":$cfg") + rules }
         val previous = DexArchives.readClassManifest(projectDexRoot)
         val changed = current.keys.filter { previous[it] != current[it] }      // new or modified
         val removed = previous.keys - current.keys
@@ -1378,6 +1408,8 @@ internal object DexArchives {
      * content means an identical class set, so a proof recorded for that name holds for any jar mapping to it.
      */
     fun bucketVerified(bucket: Path): Boolean {
+        // A pointer is as good as what it points to (and nothing once that is gone).
+        if (Files.isRegularFile(bucket.resolve(POINTER))) return pointerTarget(bucket) != null
         val f = bucket.resolve(BUCKET_SENTINEL)
         if (!Files.isRegularFile(f)) return false
         val lines = runCatching { Files.readAllLines(f) }.getOrNull() ?: return false
@@ -1399,20 +1431,62 @@ internal object DexArchives {
      * dropped whole; a partial overlap is also dropped, at worst reviving a benign "Type not found" desugaring
      * warning for its unique classes — never a hard failure. A class-less jar (a resource-only AAR's
      * classes.jar) adds no types and can't be opened on ART when empty (zero-entry zip), so it is excluded.
+     *
+     * Only entries D8 reads as types count ([definesType]). `module-info.class` and anything under `META-INF/`
+     * are not types to D8, and every multi-release jar carries `META-INF/versions/9/module-info.class`: counted,
+     * that one shared entry made kotlin-stdlib, kotlinx-coroutines and the rest "overlap" the first such jar and
+     * fall off the classpath, so every library desugared without them.
      */
     fun classpathFor(
         candidates: Collection<Path>, classesOf: Map<Path, Set<String>>, exclude: Set<String>,
     ): List<Path> {
-        val seen = HashSet(exclude)
+        val seen = exclude.filterTo(HashSet()) { definesType(it) }
         val kept = ArrayList<Path>()
         for (jar in candidates) {
-            val cs = classesOf[jar] ?: emptySet()
+            val cs = (classesOf[jar] ?: emptySet()).filter { definesType(it) }
             if (cs.isNotEmpty() && cs.none { it in seen }) {
                 kept.add(jar); seen.addAll(cs)
             }
         }
         return kept
     }
+
+    /**
+     * Marks a bucket that holds a library's final, MERGED dex (`classes.dex`, …) instead of one `.dex` per class:
+     * what the dex repository ships ([dev.ide.android.support.pack.DexRepository]), so a downloaded library is a
+     * file or two rather than thousands, and [DexMergeTask] passes it through instead of merging it again. Such a
+     * bucket is trusted by its [markBucketVerified] sentinel only; [bucketComplete]'s per-class scan can't see it.
+     */
+    const val MERGED_MARKER = ".merged"
+
+    fun isMergedBucket(bucket: Path): Boolean = Files.isRegularFile(bucket.resolve(MERGED_MARKER))
+
+    /**
+     * A module bucket that holds no dex of its own but names the verified, merged bucket in the shared cache whose
+     * dex it stands for: a prebuilt library is read from there by the merge instead of being copied into every
+     * project first. See [pointTo] / [pointerTarget].
+     */
+    const val POINTER = ".shared-bucket"
+
+    /** Make [bucket] a pointer to the shared merged bucket [shared]. */
+    fun pointTo(bucket: Path, shared: Path) {
+        clearDir(bucket); Files.createDirectories(bucket)
+        Files.write(bucket.resolve(MERGED_MARKER), byteArrayOf())
+        Files.write(bucket.resolve(POINTER), shared.toAbsolutePath().toString().toByteArray())
+    }
+
+    /** The shared bucket [bucket] points to, while that is still a verified merged bucket; else null. */
+    fun pointerTarget(bucket: Path): Path? {
+        val f = bucket.resolve(POINTER)
+        if (!Files.isRegularFile(f)) return null
+        val target = runCatching { java.nio.file.Paths.get(String(Files.readAllBytes(f)).trim()) }.getOrNull() ?: return null
+        return target.takeIf { isMergedBucket(it) && bucketVerified(it) }
+    }
+
+    /** Whether a jar's `.class` entry is a type D8 loads from a classpath jar (it skips `META-INF/` and
+     *  `module-info.class`, like `ArchiveClassFileProvider`). `package-info` stays: D8 reads it as a type. */
+    fun definesType(classRel: String): Boolean =
+        !classRel.startsWith("META-INF/") && classRel.substringAfterLast('/') != "module-info.class"
 
     private const val CLASS_MANIFEST = ".classmanifest"
 
@@ -1676,8 +1750,13 @@ internal object DexArchives {
         fun flush() {
             if (!dirty) return
             runCatching {
-                file.parent?.let { Files.createDirectories(it) }; Files.write(
-                file, entries.map { "${it.key}\t${it.value}" })
+                // Staged and renamed: the cache can be shared (builds and the prefetch, in two processes), and a
+                // reader must never parse a half-written file.
+                file.parent?.let { Files.createDirectories(it) }
+                val tmp = file.resolveSibling(".hashcache.${java.util.UUID.randomUUID()}.tmp")
+                Files.write(tmp, entries.map { "${it.key}\t${it.value}" })
+                runCatching { Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING) }
+                    .onFailure { Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING) }
             }
         }
     }
@@ -1867,7 +1946,9 @@ internal class DexMergeTask(
         ctx.checkCanceled()
         Files.createDirectories(outDexDir)
         val buckets = bucketsOf(dexArchives)
-        val perBucketDexes = buckets.map { dexesIn(it) }
+        // A pointer bucket's dex live in the shared bucket it names (DexArchives.POINTER).
+        val bases = buckets.map { DexArchives.pointerTarget(it) ?: it }
+        val perBucketDexes = bases.map { dexesIn(it) }
 
         // Shared merged-dex cache (wired only for the stable EXTERNAL scope): the merged indexed dex is a pure
         // function of the input library set + dexing params, so content-address it by the set of input bucket
@@ -1900,7 +1981,15 @@ internal class DexMergeTask(
             // serial flood on a phone) and runs a few at once. The in-process default leaves one group per bucket
             // and bounds concurrency by the app heap (`DexConcurrency`) — i.e. desktop behaviour is unchanged.
             DexArchives.clearDir(outDexDir); Files.createDirectories(outDexDir)
-            val plan = resolveMergePlan(buckets.size)
+            // A library that arrived already merged (the dex repository) is its own finished group: copy it
+            // through rather than hand D8 a merge it has nothing to do in.
+            val merged = buckets.indices.filter { DexArchives.isMergedBucket(buckets[it]) }.toSet()
+            for (bi in merged) {
+                val group = outDexDir.resolve("m" + buckets[bi].fileName); Files.createDirectories(group)
+                perBucketDexes[bi].forEach { Files.copy(it, group.resolve(it.fileName.toString())) }
+            }
+            if (merged.isNotEmpty()) ctx.debug("${name.value}: ${merged.size} pre-merged librar(ies) passed through")
+            val plan = resolveMergePlan(buckets.size - merged.size)
             // Per-library mode historically tolerated the SAME class arriving from two libraries (a shaded /
             // duplicated dependency the resolver can't coordinate-dedup): each library was its own indexed group,
             // so ART resolved the duplicate first-wins across dex files at runtime. Batching collapses libraries
@@ -1911,7 +2000,7 @@ internal class DexMergeTask(
             // DexMergePassthroughTest.)
             val seen = HashSet<String>()
             var dropped = 0
-            val deduped = buckets.indices.map { bi ->
+            val deduped = buckets.indices.filter { it !in merged }.map { bi ->
                 val bucket = buckets[bi]
                 perBucketDexes[bi].filter { dex ->
                     seen.add(bucket.relativize(dex).toString().replace('\\', '/')).also { if (!it) dropped++ }
@@ -1926,7 +2015,8 @@ internal class DexMergeTask(
         // twice is dirty input, and D8 surfacing it (a dup landing in the same bucket) is correct — no dedup here.
         // Pair each dex with its class-path (relative to its archive bucket) for stable bucketing.
         val entries = buckets.indices.flatMap { bi ->
-            perBucketDexes[bi].map { buckets[bi].relativize(it).toString().replace('\\', '/') to it }
+            val base = DexArchives.pointerTarget(buckets[bi]) ?: buckets[bi]
+            perBucketDexes[bi].map { base.relativize(it).toString().replace('\\', '/') to it }
         }
         // An empty layer is valid (e.g. mergeLibDex with no sub-module deps) — produce an empty dex dir.
         if (entries.isEmpty()) { DexArchives.clearDir(outDexDir); return TaskResult.Success }
@@ -2376,9 +2466,12 @@ internal class PackageApkTask(
     private val artProfile: Pair<Path, Path>? = null,
     /** The module's packaging options; only [AndroidPackaging.noCompress] matters here (which entries are STORED). */
     private val packaging: AndroidPackaging = AndroidPackaging(),
+    /** Deflate level for the entries this step compresses: fast for debug, smallest for release. */
+    private val compressionLevel: Int = java.util.zip.Deflater.BEST_COMPRESSION,
 ) : Task {
     override val inputs: TaskInputs
         get() = TaskInputsImpl().apply {
+            property("compression", compressionLevel)
             filePaths("ap", listOf(resourcesAp))
             dirPaths("dex", dexDirs)
             dirPaths("assets", assetsDirs)
@@ -2395,8 +2488,10 @@ internal class PackageApkTask(
             val names =
                 ApkPackaging.assembleApk(
                     resourcesAp, dexDirs, assetsDirs, jniLibDirs, outApk, javaResJars, artProfile, packaging::isNoCompressed,
+                    compressionLevel,
                 )
-            ctx.debug("packageApk -> ${outApk.fileName} (${names.size} entries)")
+            val (reused, fresh) = ApkPackaging.lastReuse
+            ctx.debug("packageApk -> ${outApk.fileName} (${names.size} entries; $reused reused from the previous APK, $fresh written)")
             TaskResult.Success as TaskResult
         }.getOrElse { TaskResult.Failed("packageApk failed: ${it.message}", it) }
     }
@@ -2433,4 +2528,3 @@ internal class SignApkTask(
         return if (r.success) TaskResult.Success else TaskResult.Failed("apk signing failed")
     }
 }
-

@@ -4,6 +4,9 @@ import dev.ide.platform.JsonReader
 import dev.ide.store.ManagedPublisher
 import dev.ide.store.AdminPaymentRequest
 import dev.ide.store.AdminPlan
+import dev.ide.store.AdminFeature
+import dev.ide.store.AdminRelease
+import dev.ide.store.AppUpdate
 import dev.ide.store.PaymentRequest
 import dev.ide.store.RenewalRequest
 import dev.ide.store.VerificationPlan
@@ -464,6 +467,81 @@ class SupabaseModerationService(
         return unit(rpc("store_admin_reject_payment", """{"p_id":${q(id)},"p_note":$text}""", token))
     }
 
+    override fun adminFeatures(): StoreResult<List<AdminFeature>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_admin_list_features", "{}", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parseFeature),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun setFeature(
+        key: String, enabled: Boolean, percent: Int, audience: String, allowUserIds: List<String>,
+    ): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val ids = allowUserIds.joinToString(",", "[", "]") { q(it) }
+        val body = """{"p_key":${q(key)},"p_enabled":$enabled,"p_percent":$percent,"p_audience":${q(audience)},"p_allow_user_ids":$ids}"""
+        return unit(rpc("store_admin_set_feature", body, token))
+    }
+
+    override fun adminReleases(limit: Int): StoreResult<List<AdminRelease>> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return when (val r = rpc("store_admin_list_releases", """{"p_limit":$limit}""", token)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.arr(JsonReader.parseOrNull(r.value)).mapNotNull(::parseRelease),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun publishRelease(
+        versionCode: Int, versionName: String, channel: String, downloadUrl: String, notes: String?,
+        percent: Int, audience: String, mandatory: Boolean,
+    ): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val text = if (notes.isNullOrBlank()) "null" else q(notes.trim())
+        val body = """{"p_version_code":$versionCode,"p_version_name":${q(versionName)},"p_channel":${q(channel)},""" +
+            """"p_download_url":${q(downloadUrl)},"p_notes":$text,"p_percent":$percent,"p_audience":${q(audience)},"p_mandatory":$mandatory}"""
+        return unit(rpc("store_admin_publish_release", body, token))
+    }
+
+    override fun setRelease(id: String, enabled: Boolean, percent: Int, audience: String, mandatory: Boolean?): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        val body = """{"p_id":${q(id)},"p_enabled":$enabled,"p_percent":$percent,"p_audience":${q(audience)},"p_mandatory":$mandatory}"""
+        return unit(rpc("store_admin_set_release", body, token))
+    }
+
+    override fun deleteRelease(id: String): StoreResult<Unit> {
+        val token = accounts.bearer() ?: return StoreResult.Failed("Sign in first")
+        return unit(rpc("store_admin_delete_release", """{"p_id":${q(id)}}""", token))
+    }
+
+    // These two use the signed-in account's token when there is one, so verified-only rollouts can match it.
+    // Without a sign-in they fall back to the public key, which only reaches the all-users rollouts.
+    override fun myFeatures(device: String?): StoreResult<Map<String, Boolean>> {
+        val body = """{"p_device":${device?.let { q(it) } ?: "null"}}"""
+        return when (val r = request("POST", "$base/rest/v1/rpc/store_my_features", body, accounts.bearer() ?: apiKey)) {
+            is StoreResult.Ok -> StoreResult.Ok(
+                JsonReader.obj(JsonReader.parseOrNull(r.value))?.mapValues { it.value == true }.orEmpty(),
+            )
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
+    override fun latestUpdate(device: String?): StoreResult<AppUpdate?> {
+        val body = """{"p_device":${device?.let { q(it) } ?: "null"}}"""
+        return when (val r = request("POST", "$base/rest/v1/rpc/store_latest_update", body, accounts.bearer() ?: apiKey)) {
+            is StoreResult.Ok -> StoreResult.Ok(parseUpdate(JsonReader.parseOrNull(r.value)))
+            is StoreResult.Unavailable -> StoreResult.Unavailable(r.reason)
+            is StoreResult.Failed -> StoreResult.Failed(r.message, r.status)
+        }
+    }
+
     private fun unit(result: StoreResult<String>): StoreResult<Unit> = when (result) {
         is StoreResult.Ok -> StoreResult.Ok(Unit)
         is StoreResult.Unavailable -> StoreResult.Unavailable(result.reason)
@@ -627,6 +705,48 @@ class SupabaseModerationService(
                 reference = JsonReader.str(value, "reference").orEmpty(),
                 status = JsonReader.str(value, "status").orEmpty(),
                 createdAt = JsonReader.str(value, "createdAt").orEmpty(),
+            )
+        }
+
+        internal fun parseFeature(value: Any?): AdminFeature? {
+            val key = JsonReader.str(value, "key") ?: return null
+            return AdminFeature(
+                key = key,
+                enabled = JsonReader.bool(value, "enabled"),
+                percent = JsonReader.int(value, "percent"),
+                audience = JsonReader.str(value, "audience").orEmpty(),
+                allowUserIds = JsonReader.strings(value, "allowUserIds"),
+            )
+        }
+
+        internal fun parseRelease(value: Any?): AdminRelease? {
+            val id = JsonReader.str(value, "id") ?: return null
+            return AdminRelease(
+                id = id,
+                versionCode = JsonReader.int(value, "versionCode"),
+                versionName = JsonReader.str(value, "versionName").orEmpty(),
+                channel = JsonReader.str(value, "channel").orEmpty(),
+                enabled = JsonReader.bool(value, "enabled"),
+                percent = JsonReader.int(value, "percent"),
+                audience = JsonReader.str(value, "audience").orEmpty(),
+                downloadUrl = JsonReader.str(value, "downloadUrl").orEmpty(),
+                notes = JsonReader.str(value, "notes"),
+                publishedAt = JsonReader.str(value, "publishedAt").orEmpty(),
+                mandatory = JsonReader.bool(value, "mandatory"),
+            )
+        }
+
+        internal fun parseUpdate(value: Any?): AppUpdate? {
+            val code = JsonReader.int(value, "versionCode")
+            if (code <= 0) return null
+            val url = JsonReader.str(value, "downloadUrl") ?: return null
+            return AppUpdate(
+                versionCode = code,
+                versionName = JsonReader.str(value, "versionName").orEmpty(),
+                channel = JsonReader.str(value, "channel").orEmpty(),
+                downloadUrl = url,
+                notes = JsonReader.str(value, "notes"),
+                mandatory = JsonReader.bool(value, "mandatory"),
             )
         }
 

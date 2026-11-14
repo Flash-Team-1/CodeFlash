@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import dev.ide.ui.backend.IdeBackend
 import dev.ide.ui.backend.UiAdminPaymentRequest
 import dev.ide.ui.backend.UiAdminPlan
+import dev.ide.ui.backend.UiAdminFeature
+import dev.ide.ui.backend.UiAdminRelease
 import dev.ide.ui.backend.UiListingEdit
 import dev.ide.ui.backend.UiManagedPublisher
 import dev.ide.ui.backend.UiModerationQueue
@@ -107,6 +109,8 @@ fun ModerationScreen(
     var renewals by remember { mutableStateOf<List<UiRenewalRequest>>(emptyList()) }
     var payments by remember { mutableStateOf<List<UiAdminPaymentRequest>>(emptyList()) }
     var plans by remember { mutableStateOf<List<UiAdminPlan>>(emptyList()) }
+    var features by remember { mutableStateOf<List<UiAdminFeature>>(emptyList()) }
+    var releases by remember { mutableStateOf<List<UiAdminRelease>>(emptyList()) }
     // What the last decision said. Kept as the backend wrote it: "was already approved" is what a second
     // moderator sees, and paraphrasing it would lose the only part that explains anything.
     var notice by remember { mutableStateOf<String?>(null) }
@@ -134,6 +138,8 @@ fun ModerationScreen(
         renewals = runCatching { backend.store.renewalRequests() }.getOrDefault(emptyList())
         payments = runCatching { backend.store.paymentRequestsForReview() }.getOrDefault(emptyList())
         plans = runCatching { backend.store.adminPlans() }.getOrDefault(emptyList())
+        features = runCatching { backend.store.adminFeatures() }.getOrDefault(emptyList())
+        releases = runCatching { backend.store.adminReleases() }.getOrDefault(emptyList())
     }
 
     /** Run a decision, show whatever it said, and reload either way: the queue moved regardless. */
@@ -228,6 +234,26 @@ fun ModerationScreen(
                         onSavePlan = { code, price, list, active ->
                             decide { backend.store.setPlan(code, price, list, active) }
                         },
+                    )
+
+                    ModerationTab.Features -> FeaturesList(
+                        features = features,
+                        enabled = !working,
+                        onSave = { key, on, percent, audience, ids ->
+                            decide { backend.store.setFeature(key, on, percent, audience, ids) }
+                        },
+                    )
+
+                    ModerationTab.Updates -> ReleasesList(
+                        releases = releases,
+                        enabled = !working,
+                        onPublish = { code, name, channel, url, notes, percent, audience, mandatory ->
+                            decide { backend.store.publishRelease(code, name, channel, url, notes, percent, audience, mandatory) }
+                        },
+                        onEdit = { id, on, percent, audience, mandatory ->
+                            decide { backend.store.setRelease(id, on, percent, audience, mandatory) }
+                        },
+                        onDelete = { id -> decide { backend.store.deleteRelease(id) } },
                     )
 
                     ModerationTab.Learn -> LearnReportList(
@@ -469,7 +495,7 @@ private fun NotAModerator() {
     }
 }
 
-private enum class ModerationTab { Queue, Reports, Learn, Verify, Requests, Payments }
+private enum class ModerationTab { Queue, Reports, Learn, Verify, Requests, Payments, Features, Updates }
 
 /**
  * Verification requests from publishers who asked for one. Tap a row for their details, then open their
@@ -594,6 +620,7 @@ private fun ModerationTabs(
                 ModerationTab.Verify -> 0
                 ModerationTab.Requests -> requests
                 ModerationTab.Payments -> payments
+                ModerationTab.Features, ModerationTab.Updates -> 0
             }
             val label = when (t) {
                 ModerationTab.Queue -> stringResource(Res.string.moderation_tab_queue)
@@ -602,6 +629,8 @@ private fun ModerationTabs(
                 ModerationTab.Verify -> stringResource(Res.string.moderation_tab_verify)
                 ModerationTab.Requests -> stringResource(Res.string.moderation_tab_requests)
                 ModerationTab.Payments -> stringResource(Res.string.moderation_tab_payments)
+                ModerationTab.Features -> stringResource(Res.string.moderation_tab_features)
+                ModerationTab.Updates -> stringResource(Res.string.moderation_tab_updates)
             }
             PillChip(
                 label = if (count > 0) "$label ($count)" else label,
@@ -1387,6 +1416,367 @@ private fun RejectPaymentDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(Res.string.payments_cancel)) }
+        },
+    )
+}
+
+private val featureKeyPattern = Regex("[a-z0-9-]{2,40}")
+
+@Composable
+private fun featureSummary(f: UiAdminFeature): String {
+    val state = if (f.enabled) stringResource(Res.string.rollout_on) else stringResource(Res.string.rollout_off)
+    val who = audienceLabel(f.audience)
+    return "$state · ${f.percent}% · $who"
+}
+
+@Composable
+private fun audienceLabel(audience: String): String =
+    when (audience) {
+        "verified" -> stringResource(Res.string.rollout_audience_verified)
+        "admin" -> stringResource(Res.string.rollout_audience_admin)
+        else -> stringResource(Res.string.rollout_audience_all)
+    }
+
+/** Features with their rollout. Tap one to change it, or add a new one with its key. */
+@Composable
+private fun FeaturesList(
+    features: List<UiAdminFeature>,
+    enabled: Boolean,
+    onSave: (String, Boolean, Int, String, List<String>) -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    var editing by remember { mutableStateOf<UiAdminFeature?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    LazyColumn(
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "add") {
+            OutlinedButton(enabled = enabled, onClick = { creating = true }) {
+                Text(stringResource(Res.string.rollout_add_feature))
+            }
+        }
+        if (features.isEmpty()) {
+            item(key = "empty") {
+                Text(stringResource(Res.string.rollout_empty), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+            }
+        }
+        items(features, key = { it.key }) { f ->
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = c.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = { editing = f }),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(f.key, style = MaterialTheme.typography.titleSmall, color = c.onSurface)
+                    Spacer(Modifier.height(4.dp))
+                    Text(featureSummary(f), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+                }
+            }
+        }
+    }
+
+    if (creating) {
+        FeatureDialog(
+            feature = null,
+            onDismiss = { creating = false },
+            onSave = { key, on, percent, audience, ids ->
+                creating = false
+                onSave(key, on, percent, audience, ids)
+            },
+        )
+    }
+    editing?.let { f ->
+        FeatureDialog(
+            feature = f,
+            onDismiss = { editing = null },
+            onSave = { key, on, percent, audience, ids ->
+                editing = null
+                onSave(key, on, percent, audience, ids)
+            },
+        )
+    }
+}
+
+@Composable
+private fun FeatureDialog(
+    feature: UiAdminFeature?,
+    onDismiss: () -> Unit,
+    onSave: (String, Boolean, Int, String, List<String>) -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    var key by remember(feature?.key) { mutableStateOf(feature?.key.orEmpty()) }
+    var on by remember(feature?.key) { mutableStateOf(feature?.enabled ?: true) }
+    var percent by remember(feature?.key) { mutableStateOf((feature?.percent ?: 100).toString()) }
+    var audience by remember(feature?.key) { mutableStateOf(feature?.audience ?: "all") }
+    val percentValue = percent.toIntOrNull()?.takeIf { it in 0..100 }
+    val keyOk = feature != null || featureKeyPattern.matches(key)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(feature?.key ?: stringResource(Res.string.rollout_add_feature)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (feature == null) {
+                    OutlinedTextField(
+                        value = key,
+                        onValueChange = { raw ->
+                            key = raw.lowercase().filter { ch -> ch in 'a'..'z' || ch in '0'..'9' || ch == '-' }.take(40)
+                        },
+                        label = { Text(stringResource(Res.string.rollout_key_label)) },
+                        singleLine = true,
+                    )
+                    if (key.isNotEmpty() && !keyOk) {
+                        Text(
+                            stringResource(Res.string.rollout_key_invalid),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = c.error,
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = percent,
+                    onValueChange = { percent = it.filter { ch -> ch.isDigit() }.take(3) },
+                    label = { Text(stringResource(Res.string.rollout_percent_label)) },
+                    singleLine = true,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(1, 5, 25, 50, 100).forEach { preset ->
+                        TextButton(onClick = { percent = preset.toString() }) { Text("$preset%") }
+                    }
+                }
+                TextButton(onClick = { on = !on }) {
+                    Text(if (on) stringResource(Res.string.rollout_turn_off) else stringResource(Res.string.rollout_turn_on))
+                }
+                TextButton(onClick = { audience = if (audience == "all") "verified" else "all" }) {
+                    Text(audienceLabel(audience))
+                }
+                if (feature != null) {
+                    Text(
+                        stringResource(Res.string.rollout_allowlist, feature.allowUserIds.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = keyOk && percentValue != null,
+                onClick = {
+                    val p = percentValue ?: return@TextButton
+                    onSave(feature?.key ?: key, on, p, audience, feature?.allowUserIds.orEmpty())
+                },
+            ) { Text(stringResource(Res.string.rollout_save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.rollout_cancel)) }
+        },
+    )
+}
+
+/** Builds you publish for the in-app update, with their channel, rollout and audience. */
+@Composable
+private fun ReleasesList(
+    releases: List<UiAdminRelease>,
+    enabled: Boolean,
+    onPublish: (Int, String, String, String, String?, Int, String, Boolean) -> Unit,
+    onEdit: (String, Boolean, Int, String, Boolean) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    var publishing by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<UiAdminRelease?>(null) }
+    LazyColumn(
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item(key = "publish") {
+            OutlinedButton(enabled = enabled, onClick = { publishing = true }) {
+                Text(stringResource(Res.string.release_publish))
+            }
+        }
+        if (releases.isEmpty()) {
+            item(key = "empty") {
+                Text(stringResource(Res.string.release_empty), style = MaterialTheme.typography.bodyMedium, color = c.onSurfaceVariant)
+            }
+        }
+        items(releases, key = { it.id }) { r ->
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = c.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = { editing = r }),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(Res.string.release_card, r.versionName, r.versionCode),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = c.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val state = if (r.enabled) stringResource(Res.string.rollout_on) else stringResource(Res.string.rollout_off)
+                    val required = if (r.mandatory) " · " + stringResource(Res.string.release_required_badge) else ""
+                    Text(
+                        "${channelLabel(r.channel)} · $state · ${r.percent}% · ${audienceLabel(r.audience)}$required",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    if (publishing) {
+        ReleaseDialog(
+            release = null,
+            onDismiss = { publishing = false },
+            onPublish = { code, name, channel, url, notes, percent, audience, mandatory ->
+                publishing = false
+                onPublish(code, name, channel, url, notes, percent, audience, mandatory)
+            },
+            onEdit = { _, _, _, _, _ -> },
+            onDelete = {},
+        )
+    }
+    editing?.let { r ->
+        ReleaseDialog(
+            release = r,
+            onDismiss = { editing = null },
+            onPublish = { _, _, _, _, _, _, _, _ -> },
+            onEdit = { id, on, percent, audience, mandatory ->
+                editing = null
+                onEdit(id, on, percent, audience, mandatory)
+            },
+            onDelete = { id ->
+                editing = null
+                onDelete(id)
+            },
+        )
+    }
+}
+
+@Composable
+private fun channelLabel(channel: String): String =
+    if (channel == "beta") stringResource(Res.string.release_channel_beta)
+    else stringResource(Res.string.release_channel_stable)
+
+@Composable
+private fun ReleaseDialog(
+    release: UiAdminRelease?,
+    onDismiss: () -> Unit,
+    onPublish: (Int, String, String, String, String?, Int, String, Boolean) -> Unit,
+    onEdit: (String, Boolean, Int, String, Boolean) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    val c = MaterialTheme.colorScheme
+    var code by remember(release?.id) { mutableStateOf("") }
+    var name by remember(release?.id) { mutableStateOf("") }
+    var url by remember(release?.id) { mutableStateOf("") }
+    var notes by remember(release?.id) { mutableStateOf("") }
+    var channel by remember(release?.id) { mutableStateOf("stable") }
+    var on by remember(release?.id) { mutableStateOf(release?.enabled ?: true) }
+    var mandatory by remember(release?.id) { mutableStateOf(release?.mandatory ?: false) }
+    var armedDelete by remember(release?.id) { mutableStateOf(false) }
+    var percent by remember(release?.id) { mutableStateOf((release?.percent ?: 100).toString()) }
+    var audience by remember(release?.id) { mutableStateOf(release?.audience ?: "all") }
+    val percentValue = percent.toIntOrNull()?.takeIf { it in 0..100 }
+    val codeValue = code.toIntOrNull()?.takeIf { it > 0 }
+    val publishOk = codeValue != null && name.isNotBlank() && url.trim().startsWith("https://")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (release == null) stringResource(Res.string.release_publish)
+                else stringResource(Res.string.release_card, release.versionName, release.versionCode),
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (release == null) {
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it.filter { ch -> ch.isDigit() }.take(9) },
+                        label = { Text(stringResource(Res.string.release_version_code)) },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it.take(40) },
+                        label = { Text(stringResource(Res.string.release_version_name)) },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = { url = it.trim() },
+                        label = { Text(stringResource(Res.string.release_url)) },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = notes,
+                        onValueChange = { notes = it },
+                        label = { Text(stringResource(Res.string.release_notes)) },
+                        minLines = 2,
+                    )
+                    TextButton(onClick = { channel = if (channel == "stable") "beta" else "stable" }) {
+                        Text("${stringResource(Res.string.release_channel_label)}: ${channelLabel(channel)}")
+                    }
+                } else {
+                    TextButton(onClick = { on = !on }) {
+                        Text(if (on) stringResource(Res.string.rollout_turn_off) else stringResource(Res.string.rollout_turn_on))
+                    }
+                }
+                TextButton(onClick = { mandatory = !mandatory }) {
+                    Text(if (mandatory) stringResource(Res.string.release_mandatory_on) else stringResource(Res.string.release_mandatory_off))
+                }
+                OutlinedTextField(
+                    value = percent,
+                    onValueChange = { percent = it.filter { ch -> ch.isDigit() }.take(3) },
+                    label = { Text(stringResource(Res.string.rollout_percent_label)) },
+                    singleLine = true,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(1, 5, 25, 50, 100).forEach { preset ->
+                        TextButton(onClick = { percent = preset.toString() }) { Text("$preset%") }
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        // Cycles Everyone -> Verified only -> Admins only -> Everyone.
+                        audience = when (audience) { "all" -> "verified"; "verified" -> "admin"; else -> "all" }
+                    },
+                ) {
+                    Text(audienceLabel(audience))
+                }
+                if (release != null) {
+                    TextButton(
+                        onClick = {
+                            // Two taps: the first arms it, the second removes the build.
+                            if (armedDelete) onDelete(release.id) else armedDelete = true
+                        },
+                    ) {
+                        Text(
+                            if (armedDelete) stringResource(Res.string.release_delete_confirm) else stringResource(Res.string.release_delete),
+                            color = c.error,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = percentValue != null && (release != null || publishOk),
+                onClick = {
+                    val p = percentValue ?: return@TextButton
+                    if (release == null) {
+                        val version = codeValue ?: return@TextButton
+                        onPublish(version, name.trim(), channel, url.trim(), notes.trim().takeIf { it.isNotEmpty() }, p, audience, mandatory)
+                    } else {
+                        onEdit(release.id, on, p, audience, mandatory)
+                    }
+                },
+            ) { Text(stringResource(Res.string.rollout_save)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.rollout_cancel)) }
         },
     )
 }

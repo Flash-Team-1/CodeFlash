@@ -272,6 +272,19 @@ internal class BuildService(private val ctx: EngineContext) : Disposable, BuildC
                     }
                 },
                 platformFor = platformJarFor,
+                // Libraries we dexed and published ahead of time (signed, one file per library version), so a new
+                // project's first build downloads its Compose/AndroidX dex instead of dexing ~70 jars on the phone.
+                // The jars the IDE adds to every user app itself (no Maven coordinate) come pre-dexed in the APK;
+                // everything else is looked up in the repository.
+                dexPack = dev.ide.android.support.pack.DexPackSource.chain(
+                    dev.ide.android.support.pack.BundledDex(
+                        listOfNotNull(
+                            BundledKotlinStdlib.jar()?.let { j -> t.predexedJars["kotlin-stdlib"]?.let { j to it } },
+                            t.appLogRuntimeJar?.let { j -> t.predexedJars["applog-runtime"]?.let { j to it } },
+                        ).toMap(),
+                    ),
+                    dev.ide.android.support.pack.DexRepository.at(t.dexPackUrl),
+                ),
             )
         }
         val installed = BundledAndroidToolchain.installed()
@@ -329,7 +342,40 @@ internal class BuildService(private val ctx: EngineContext) : Disposable, BuildC
     private val dexWarmConnection: MessageBusConnection = ctx.store.bus.connect().also { conn ->
         // A throwing subscriber aborts the model commit that published the event (the bus rethrows), so this must
         // do nothing but arm a timer, and must not throw doing it.
-        conn.subscribe(ProjectModelTopics.CHANGES, ProjectModelListener { runCatching { scheduleDexWarm() } })
+        conn.subscribe(ProjectModelTopics.CHANGES, ProjectModelListener { runCatching { scheduleDexWarm(); scheduleDexPrefetch() } })
+    }
+
+    /**
+     * Download-only counterpart of the warm: once a project's dependencies are known (a resolution finished, or the
+     * project opened), install its libraries' prebuilt dex from the dex repository into the shared cache, so the
+     * first build doesn't wait for the download. No D8, so none of the warm's cost; the "Download prebuilt
+     * libraries" setting decides whether anything is fetched (the build system's repository source reads it). Skips
+     * while a build runs: that build fetches what it needs itself.
+     */
+    private var dexPrefetchJob: Job? = null
+
+    private fun scheduleDexPrefetch() {
+        val previous = dexPrefetchJob
+        dexPrefetchJob = buildScope.launch {
+            previous?.cancelAndJoin()
+            delay(DEX_PREFETCH_DELAY_MS)      // coalesce a burst of model commits into one pass
+            if (buildJob?.isActive == true || dev.ide.platform.BuildActivity.active.value) return@launch
+            val android = androidBuild ?: return@launch
+            for (module in ctx.modules()) {
+                if (module.facets.get(AndroidFacet.KEY)?.isApplication != true) continue
+                if (unresolvedBlocker(module) != null) continue
+                val n = runCatching {
+                    kotlinx.coroutines.runInterruptible(kotlinx.coroutines.Dispatchers.IO) {
+                        android.prefetchLibraryDex(
+                            module, ctx.activeVariant(module),
+                            log = { memLog.info("dex prefetch ${module.name}: $it") },
+                            checkCanceled = { if (dev.ide.platform.BuildActivity.active.value) throw kotlinx.coroutines.CancellationException("build started") },
+                        )
+                    }
+                }.getOrDefault(0)
+                if (n > 0) memLog.info("dex prefetch: ${module.name} — $n library(ies) ready before the build")
+            }
+        }
     }
 
     init {
@@ -337,6 +383,7 @@ internal class BuildService(private val ctx: EngineContext) : Disposable, BuildC
         // dependency resolution already published — so arm once here too, or the project-open warm, the one that
         // matters most, would wait for some later model change.
         runCatching { scheduleDexWarm() }
+        runCatching { scheduleDexPrefetch() }
     }
 
     private val buildCache = BuildCache(ctx.store.rootPath.resolve(".platform/caches/build"))
@@ -1829,6 +1876,9 @@ internal class BuildService(private val ctx: EngineContext) : Disposable, BuildC
          *  machine to themselves. */
         private const val DEX_WARM_DELAY_MS = 15_000L
 
+        /** Short: the point of prefetching is to finish before a build the user may start right after resolving. */
+        private const val DEX_PREFETCH_DELAY_MS = 2_000L
+
         /** Coalesce console output into chunks up to this size; cap the retained transcript so an interactive
          *  program's output is otherwise unbounded. */
         private const val CONSOLE_CHUNK_MAX = 8192
@@ -1838,4 +1888,3 @@ internal class BuildService(private val ctx: EngineContext) : Disposable, BuildC
         private const val CAPTURE_MAX = 200_000
     }
 }
-

@@ -294,6 +294,12 @@ open class MainActivity : ComponentActivity() {
 
                     override val canInstallApk: Boolean = true
                     override fun installApk(path: String) = fileOps.promptInstall(path)
+
+                    override val appVersionCode: Int = BuildConfig.VERSION_CODE
+                    override val canDownloadFile: Boolean = true
+                    override suspend fun downloadFile(url: String, fileName: String, onProgress: (Float) -> Unit): String? =
+                        UpdateDownloader.download(this@MainActivity, url, fileName, onProgress)
+                    override fun installDownloadedApk(path: String) = UpdateDownloader.install(this@MainActivity, path)
                 }
             }
 
